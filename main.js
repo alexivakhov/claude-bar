@@ -171,6 +171,12 @@ ipcMain.on('window-resize', (_, { w, h }) => {
   }
 });
 
+ipcMain.on('pin-toggle', (_, pinned) => {
+  if (floatWin && !floatWin.isDestroyed()) {
+    floatWin.setAlwaysOnTop(pinned);
+  }
+});
+
 ipcMain.on('usage:update', async (_, data) => {
   await saveCookies();
   if (floatWin && !floatWin.isDestroyed()) {

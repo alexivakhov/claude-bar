@@ -1,6 +1,6 @@
 {
   "name": "claude-bar",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Transparent floating widget that tracks Claude.ai usage limits",
   "author": "vfxmajmuni",
   "main": "main.js",

@@ -8,7 +8,7 @@ A transparent floating widget for macOS that tracks your Claude.ai usage limits 
 
 ## Features
 
-- **Always on top** — borderless, semi-transparent widget that stays above all windows
+- **Always on top** — borderless, semi-transparent widget that stays above all windows; click `⊤` to send it to the background, `⊥` to pin it back — choice persists across restarts
 - **Real-time usage bars** — session, weekly, and per-model limits with color coding
 - **Plan detection** — automatically reads your plan (Free, Pro, Max, Team, Enterprise) from the API
 - **Smart colors** — green → yellow → blinking red as limits approach
@@ -22,6 +22,14 @@ A transparent floating widget for macOS that tracks your Claude.ai usage limits 
 Download the latest `.dmg` from the [Releases](https://github.com/vfxmajmuni/claude-bar/releases) tab, open it, and drag **Claude Bar** to Applications.
 
 > First launch: right-click the app → **Open** to bypass the macOS Gatekeeper warning (ad-hoc signed build).
+
+## Footer controls
+
+| Button | Action |
+|--------|--------|
+| `◑` | Cycle color theme (Dark → Light → Mauve) |
+| `⊤` / `⊥` | Toggle always-on-top. `⊤` = pinned above all windows; `⊥` = normal window (other windows can cover it) |
+| `↗ log in` | Open login / log out |
 
 ## Themes
 

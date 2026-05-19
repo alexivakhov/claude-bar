@@ -15,6 +15,20 @@ function cycleTheme() {
   if (saved && THEMES.includes(saved)) document.documentElement.dataset.theme = saved;
 })();
 
+(function () {
+  const pinned = localStorage.getItem('claude-bar-pin') !== 'false';
+  document.getElementById('pinBtn').textContent = pinned ? '⊤' : '⊥';
+  window.claudeBar.setPin(pinned);
+})();
+
+function togglePin() {
+  const pinned = localStorage.getItem('claude-bar-pin') !== 'false';
+  const next = !pinned;
+  localStorage.setItem('claude-bar-pin', String(next));
+  document.getElementById('pinBtn').textContent = next ? '⊤' : '⊥';
+  window.claudeBar.setPin(next);
+}
+
 function colorClass(mins) {
   if (mins === null || mins === undefined) return '';
   if (mins <= 15) return 'crit';
@@ -118,6 +132,7 @@ window.claudeBar.onUpdate((data) => render(data));
 document.getElementById('closeBtn').addEventListener('click', () => window.close());
 document.getElementById('loginBtn').addEventListener('click', () => window.claudeBar.openLogin());
 document.getElementById('themeBtn').addEventListener('click', cycleTheme);
+document.getElementById('pinBtn').addEventListener('click', togglePin);
 
 setInterval(() => {
   if (lastTs) document.getElementById('updated').textContent = timeAgo(lastTs);
