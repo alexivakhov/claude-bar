@@ -77,7 +77,7 @@ async function createScraper() {
     width: 480,
     height: 680,
     show: false,
-    title: 'Claude — залогінься тут',
+    title: 'Claude — log in here',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,

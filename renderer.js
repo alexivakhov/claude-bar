@@ -1,3 +1,20 @@
+const THEMES = ['dark', 'light', 'mauve'];
+
+function applyTheme(name) {
+  document.documentElement.dataset.theme = name;
+  localStorage.setItem('claude-bar-theme', name);
+}
+
+function cycleTheme() {
+  const cur = document.documentElement.dataset.theme || 'dark';
+  applyTheme(THEMES[(THEMES.indexOf(cur) + 1) % THEMES.length]);
+}
+
+(function () {
+  const saved = localStorage.getItem('claude-bar-theme');
+  if (saved && THEMES.includes(saved)) document.documentElement.dataset.theme = saved;
+})();
+
 function colorClass(mins) {
   if (mins === null || mins === undefined) return '';
   if (mins <= 15) return 'crit';
@@ -16,14 +33,14 @@ function fmt(mins) {
   if (mins <= 0) return '0:00';
   const h = Math.floor(mins / 60);
   const m = Math.round(mins % 60);
-  return h > 0 ? `${h}:${String(m).padStart(2,'0')}` : `0:${String(m).padStart(2,'0')}`;
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}` : `0:${String(m).padStart(2, '0')}`;
 }
 
 function timeAgo(ts) {
   if (!ts) return '—';
   const s = Math.round((Date.now() - ts) / 1000);
-  if (s < 60) return `оновлено ${s}с тому`;
-  return `оновлено ${Math.round(s/60)}хв тому`;
+  if (s < 60) return `last updated ${s}s ago`;
+  return `last updated ${Math.round(s / 60)}min ago`;
 }
 
 function fmtDuration(ms) {
@@ -38,10 +55,10 @@ function fmtDuration(ms) {
 let lastTs = null;
 
 function render(data) {
-  const dot      = document.getElementById('dot');
-  const timer    = document.getElementById('timer');
-  const barsEl   = document.getElementById('bars');
-  const updated  = document.getElementById('updated');
+  const dot = document.getElementById('dot');
+  const timer = document.getElementById('timer');
+  const barsEl = document.getElementById('bars');
+  const updated = document.getElementById('updated');
   const loginBtn = document.getElementById('loginBtn');
 
   const planLabel = document.getElementById('planLabel');
@@ -54,20 +71,20 @@ function render(data) {
     if (data?.noUsagePage) {
       lastTs = data.fetchedAt;
       dot.className = 'dot';
-      barsEl.innerHTML = '<div class="no-data">Ліміти на цьому<br>плані відсутні</div>';
+      barsEl.innerHTML = '<div class="no-data">No usage limits<br>on this plan</div>';
       updated.textContent = '';
-      loginBtn.textContent = '↗ вийти';
+      loginBtn.textContent = '↗ log out';
     } else {
       lastTs = null;
       dot.className = 'dot load';
-      barsEl.innerHTML = '<div class="no-data">Чекаємо дані...</div>';
-      updated.textContent = 'оновлення кожні 2хв';
-      loginBtn.textContent = '↗ логін';
+      barsEl.innerHTML = '<div class="no-data">loading...</div>';
+      updated.textContent = 'refreshing every 2min';
+      loginBtn.textContent = '↗ log in';
     }
     return;
   }
 
-  loginBtn.textContent = '↗ вийти';
+  loginBtn.textContent = '↗ log out';
   lastTs = data.fetchedAt;
 
   const sessionBar = data.bars.find(b => b.key === 'five_hour') || data.bars[0];
@@ -100,14 +117,15 @@ window.claudeBar.onUpdate((data) => render(data));
 
 document.getElementById('closeBtn').addEventListener('click', () => window.close());
 document.getElementById('loginBtn').addEventListener('click', () => window.claudeBar.openLogin());
+document.getElementById('themeBtn').addEventListener('click', cycleTheme);
 
 setInterval(() => {
   if (lastTs) document.getElementById('updated').textContent = timeAgo(lastTs);
 }, 60000);
 
-const BASE_W  = 224;
-const BASE_H  = 150;
-const ASPECT  = BASE_W / BASE_H;
+const BASE_W = 224;
+const BASE_H = 150;
+const ASPECT = BASE_W / BASE_H;
 
 function applyScale() {
   document.body.style.zoom = window.innerWidth / BASE_W;

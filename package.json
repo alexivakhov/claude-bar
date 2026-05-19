@@ -1,13 +1,14 @@
 {
   "name": "claude-bar",
-  "version": "1.0.0",
+  "version": "1.1.0",
+  "description": "Transparent floating widget that tracks Claude.ai usage limits",
+  "author": "vfxmajmuni",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --mac dir",
     "dist": "electron-builder --mac dmg"
   },
-  "dependencies": {},
   "devDependencies": {
     "electron": "^28.0.0",
     "electron-builder": "^26.8.1"
@@ -21,11 +22,25 @@
       "preload-scraper.js",
       "index.html",
       "renderer.js",
+      "style.css",
       "package.json"
     ],
     "mac": {
       "category": "public.app-category.productivity",
-      "target": [{"target": "dir", "arch": ["universal"]}]
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "dmg",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
     },
     "directories": {
       "output": "dist"

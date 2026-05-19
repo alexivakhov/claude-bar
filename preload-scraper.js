@@ -1,22 +1,22 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 const LABEL_MAP = {
-  five_hour:            'Session',
-  seven_day:            'Week — All models',
-  seven_day_sonnet:     'Week — Sonnet',
-  seven_day_opus:       'Week — Opus',
-  seven_day_omelette:   'Week — Design',
-  seven_day_cowork:     'Week — Cowork',
+  five_hour: 'Session',
+  seven_day: 'Week — All models',
+  seven_day_sonnet: 'Week — Sonnet',
+  seven_day_opus: 'Week — Opus',
+  seven_day_omelette: 'Week — Design',
+  seven_day_cowork: 'Week — Cowork',
   seven_day_oauth_apps: 'Week — OAuth apps',
 };
 
 const SHORT_LABEL_MAP = {
-  five_hour:            'СЕСІЯ',
-  seven_day:            'ТИЖДЕНЬ',
-  seven_day_sonnet:     'SONNET',
-  seven_day_opus:       'OPUS',
-  seven_day_omelette:   'DESIGN',
-  seven_day_cowork:     'COWORK',
+  five_hour: 'SESSION',
+  seven_day: 'WEEKLY',
+  seven_day_sonnet: 'SONNET',
+  seven_day_opus: 'OPUS',
+  seven_day_omelette: 'DESIGN',
+  seven_day_cowork: 'COWORK',
   seven_day_oauth_apps: 'OAUTH',
 };
 
@@ -30,11 +30,11 @@ function prettify(key) {
 }
 
 const CAPABILITY_PLAN = {
-  'claude_pro':        'Pro',
-  'claude_max':        'Max',
-  'claude_max_5x':     'Max 5×',
-  'claude_max_20x':    'Max 20×',
-  'claude_team':       'Team',
+  'claude_pro': 'Pro',
+  'claude_max': 'Max',
+  'claude_max_5x': 'Max 5×',
+  'claude_max_20x': 'Max 20×',
+  'claude_team': 'Team',
   'claude_enterprise': 'Enterprise',
 };
 
@@ -80,10 +80,10 @@ function normalize(usageJson) {
 
     bars.push({
       key,
-      label:        LABEL_MAP[key]       || prettify(key),
-      shortLabel:   SHORT_LABEL_MAP[key] || key.toUpperCase().slice(0, 8),
-      utilization:  val.utilization,
-      resetsAt:     val.resets_at || null,
+      label: LABEL_MAP[key] || prettify(key),
+      shortLabel: SHORT_LABEL_MAP[key] || key.toUpperCase().slice(0, 8),
+      utilization: val.utilization,
+      resetsAt: val.resets_at || null,
       msUntilReset: val.resets_at
         ? Math.max(0, new Date(val.resets_at).getTime() - Date.now())
         : null,
