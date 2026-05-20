@@ -4,7 +4,7 @@ A transparent floating widget for macOS that tracks your Claude.ai usage limits 
 
 | Dark | Mauve | Light |
 |------|-------|-------|
-| ![Dark theme](claude_dark.png) | ![Mauve theme](claude_blush.png) | ![Light theme](claude_light.png) |
+| ![Dark theme](claude_dark.png?v=2) | ![Mauve theme](claude_blush.png?v=2) | ![Light theme](claude_light.png?v=2) |
 
 ## Features
 
