@@ -19,9 +19,16 @@ A transparent floating widget for macOS that tracks your Claude.ai usage limits 
 
 ## Installation
 
-Download the latest `.dmg` from the [Releases](https://github.com/vfxmajmuni/claude-bar/releases) tab, open it, and drag **Claude Bar** to Applications.
+Download the latest `.dmg` from the [Releases](https://github.com/alexivakhov/claude-bar/releases) tab, open it, and drag **Claude Bar** to Applications.
 
 > First launch: right-click the app → **Open** to bypass the macOS Gatekeeper warning (ad-hoc signed build).
+
+### Requirements
+
+| | |
+|---|---|
+| **OS** | macOS 12 Monterey or later |
+| **Arch** | Apple Silicon (M1 / M2 / M3 / M4) |
 
 ## Footer controls
 
@@ -54,8 +61,8 @@ Two Electron windows:
 
 ```
 scraperWin preload
-  → fetch /api/organizations        → org UUID + capabilities[] → plan name
-  → fetch /api/organizations/{id}/usage → usage limits as JSON
+  → fetch /api/organizations              → org UUID + capabilities[] → plan name
+  → fetch /api/organizations/{id}/usage   → usage limits as JSON
   → ipcRenderer.send('usage:update', data)
   → ipcMain → floatWin.webContents.send('usage-update')
   → renderer.js → render()
@@ -73,17 +80,29 @@ scraperWin preload
 | 🟡 Warning | ≤ 45 min remaining or ≥ 70% used |
 | 🟢 OK | everything else |
 
+## Google OAuth fixes (vs original repo)
+
+The original [vfxmajmuni/claude-bar](https://github.com/vfxmajmuni/claude-bar) had three bugs that prevented Google login from working:
+
+| # | Bug | Fix |
+|---|-----|-----|
+| 1 | OAuth popup didn't inherit `partition: 'scraper-temp'` — auth cookies landed in a separate Electron session | Added `partition: SCRAPER_PARTITION` to `setWindowOpenHandler` options |
+| 2 | Electron's default UA contains the word `Electron` — Google blocks the OAuth flow with `disallowed_useragent` | Spoof a Chrome UA on both the scraper window and the popup via `setUserAgent()` |
+| 3 | `wasOnAuthPage` not reset and `poll()` not triggered in `did-finish-load` (full navigation after popup close) | Reset state and fire `poll()` explicitly on first authenticated page load |
+
 ## Development
 
 ```bash
+git clone https://github.com/alexivakhov/claude-bar.git
+cd claude-bar
 npm install
 npm start
 ```
 
-Build DMG:
+Build DMG (Apple Silicon):
 
 ```bash
-npm run dist
+npm run dist -- --arm64
 ```
 
 ## Architecture notes
@@ -93,3 +112,7 @@ npm run dist
 - Usage bars are rendered dynamically from any JSON field with a `utilization` number — new Claude model limits appear automatically without code changes
 - Resize: dragging the corner updates `body.style.zoom` synchronously on every `mousemove` before the IPC call completes, so content and window frame scale together without lag
 - Themes: CSS custom properties on `:root` + `html[data-theme]` overrides in `style.css`; flash-free loading via inline `<script>` in `<head>` that reads `localStorage` before first paint
+
+## Credits
+
+Based on [vfxmajmuni/claude-bar](https://github.com/vfxmajmuni/claude-bar) by [@vfxmajmuni](https://github.com/vfxmajmuni).
