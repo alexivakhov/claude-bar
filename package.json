@@ -29,6 +29,9 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
+      "extendInfo": {
+        "LSUIElement": true
+      },
       "target": [
         {
           "target": "dmg",

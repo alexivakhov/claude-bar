@@ -13,6 +13,9 @@ let wasOnAuthPage = false;
 let preventAutoLogin = false;
 let cookiePath;
 
+// Hide Dock icon immediately — before whenReady() to avoid the brief flash on startup.
+if (app.dock) app.dock.hide();
+
 const AUTH_PATTERNS = ['/login', '/auth', 'accounts.google'];
 
 // In-memory (no 'persist:' prefix) = no LevelDB files, no lock conflicts between restarts.
@@ -418,7 +421,6 @@ function createFloatWindow() {
 }
 
 app.whenReady().then(async () => {
-  app.dock.hide(); // no Dock icon — lives only in the menu bar status area
   cookiePath = path.join(app.getPath('userData'), 'claude-cookies.json');
   createTray();
   createFloatWindow();
