@@ -37,8 +37,8 @@ function colorClass(mins) {
 }
 
 function barColor(pct) {
-  if (pct >= 90) return 'crit';
-  if (pct >= 70) return 'warn';
+  if (pct >= 80) return 'crit';
+  if (pct >= 35) return 'warn';
   return '';
 }
 
@@ -122,7 +122,7 @@ function render(data) {
       <div class="bar-row" title="${tooltip}">
         <span class="bar-name">${bar.shortLabel}</span>
         <div class="track"><div class="fill ${cls}" style="width:${bar.utilization}%"></div></div>
-        <span class="pct">${bar.utilization}%</span>
+        <span class="pct">${Math.round(bar.utilization)}%</span>
       </div>`;
   }).join('');
 }
