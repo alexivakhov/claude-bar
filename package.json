@@ -30,7 +30,7 @@
     "mac": {
       "category": "public.app-category.productivity",
       "extendInfo": {
-        "LSUIElement": true
+        "LSUIElement": 1
       },
       "target": [
         {
