@@ -13,8 +13,10 @@ let wasOnAuthPage = false;
 let preventAutoLogin = false;
 let cookiePath;
 
-// Hide Dock icon immediately — before whenReady() to avoid the brief flash on startup.
+// Hide Dock icon at every possible lifecycle point — app.dock.hide() may be
+// ignored if called before the app is fully initialized on some macOS versions.
 if (app.dock) app.dock.hide();
+app.on('will-finish-launching', () => { if (app.dock) app.dock.hide(); });
 
 const AUTH_PATTERNS = ['/login', '/auth', 'accounts.google'];
 
@@ -429,6 +431,7 @@ function createFloatWindow() {
 }
 
 app.whenReady().then(async () => {
+  if (app.dock) app.dock.hide();
   cookiePath = path.join(app.getPath('userData'), 'claude-cookies.json');
   createTray();
   createFloatWindow();
@@ -440,5 +443,6 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => { /* intentionally empty */ });
 
 app.on('activate', () => {
+  if (app.dock) app.dock.hide();
   if (floatWin && !floatWin.isDestroyed() && !floatWin.isVisible()) floatWin.show();
 });
