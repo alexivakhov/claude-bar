@@ -72,6 +72,10 @@ async function logout() {
   }
 }
 
+// Spoof Chrome UA so Google OAuth doesn't reject the Electron embedded browser.
+const CHROME_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ' +
+  'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
 async function createScraper() {
   scraperWin = new BrowserWindow({
     width: 480,
@@ -86,20 +90,28 @@ async function createScraper() {
     }
   });
 
+  scraperWin.webContents.setUserAgent(CHROME_UA);
+
   await restoreCookies();
   scraperWin.loadURL('https://claude.ai/new');
 
-  // OAuth popups (Google/Apple login)
+  // OAuth popups (Google/Apple login): must share the same partition so
+  // auth cookies land in scraper-temp, not in a separate default session.
   scraperWin.webContents.setWindowOpenHandler(() => ({
     action: 'allow',
     overrideBrowserWindowOptions: {
       width: 480,
       height: 640,
-      webPreferences: { nodeIntegration: false, contextIsolation: true }
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        partition: SCRAPER_PARTITION,
+      }
     }
   }));
 
   scraperWin.webContents.on('did-create-window', (popup) => {
+    popup.webContents.setUserAgent(CHROME_UA);
     popup.once('closed', async () => {
       if (!preventAutoLogin) {
         await new Promise(r => setTimeout(r, 500));
@@ -153,12 +165,18 @@ async function createScraper() {
       return;
     }
 
-    // Authenticated page — preload handles polling
+    // Authenticated page (reached via full navigation after popup close).
+    const justLoggedIn = wasOnAuthPage && !isLoggedIn;
+    wasOnAuthPage = false;
     if (!isLoggedIn) {
       isLoggedIn = true;
+      preventAutoLogin = false;
       await saveCookies();
     }
     scraperWin.hide();
+    if (justLoggedIn) {
+      scraperWin.webContents.executeJavaScript('window.usageApi && window.usageApi.poll()').catch(() => {});
+    }
   });
 }
 
