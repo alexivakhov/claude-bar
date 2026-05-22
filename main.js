@@ -330,6 +330,8 @@ async function checkForUpdates() {
       `hdiutil attach -nobrowse -quiet "${dmgPath}" -mountpoint /tmp/claude-bar-mnt`,
       'ditto "/tmp/claude-bar-mnt/Claude Bar.app" "/Applications/Claude Bar.app"',
       'hdiutil detach /tmp/claude-bar-mnt -quiet',
+      'touch "/Applications/Claude Bar.app"',
+      '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "/Applications/Claude Bar.app"',
       `rm -f "${dmgPath}"`,
       'rm -f "$0"',
       'open "/Applications/Claude Bar.app"',
