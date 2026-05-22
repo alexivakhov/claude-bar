@@ -101,16 +101,6 @@ scraperWin preload
 | 🟡 Warning | ≤ 45 min remaining |
 | 🟢 OK | everything else |
 
-## Google OAuth fixes (vs original repo)
-
-The original [vfxmajmuni/claude-bar](https://github.com/vfxmajmuni/claude-bar) had three bugs that prevented Google login from working:
-
-| # | Bug | Fix |
-|---|-----|-----|
-| 1 | OAuth popup didn't inherit `partition: 'scraper-temp'` — auth cookies landed in a separate Electron session | Added `partition: SCRAPER_PARTITION` to `setWindowOpenHandler` options |
-| 2 | Electron's default UA contains the word `Electron` — Google blocks the OAuth flow with `disallowed_useragent` | Spoof a Chrome UA on both the scraper window and the popup via `setUserAgent()` |
-| 3 | `wasOnAuthPage` not reset and `poll()` not triggered in `did-finish-load` (full navigation after popup close) | Reset state and fire `poll()` explicitly on first authenticated page load |
-
 ## Development
 
 ```bash
