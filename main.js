@@ -1,6 +1,9 @@
-const { app, BrowserWindow, screen, ipcMain, session, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, session, Tray, Menu, nativeImage, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const https = require('https');
+const os = require('os');
+const { spawn } = require('child_process');
 
 let floatWin;
 let scraperWin;
@@ -15,6 +18,7 @@ const AUTH_PATTERNS = ['/login', '/auth', 'accounts.google'];
 // In-memory (no 'persist:' prefix) = no LevelDB files, no lock conflicts between restarts.
 // Cookies are persisted manually via claude-cookies.json.
 const SCRAPER_PARTITION = 'scraper-temp';
+const GITHUB_REPO = 'alexivakhov/claude-bar';
 const scraperSession = () => session.fromPartition(SCRAPER_PARTITION);
 
 async function saveCookies() {
@@ -231,6 +235,120 @@ ipcMain.on('open-login', async () => {
   }
 });
 
+function fetchJSON(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, { headers: { 'User-Agent': 'claude-bar-updater', 'Accept': 'application/vnd.github.v3+json' } }, (res) => {
+      if (res.statusCode === 301 || res.statusCode === 302) {
+        return fetchJSON(res.headers.location).then(resolve).catch(reject);
+      }
+      let data = '';
+      res.on('data', chunk => (data += chunk));
+      res.on('end', () => { try { resolve(JSON.parse(data)); } catch (e) { reject(e); } });
+    }).on('error', reject);
+  });
+}
+
+function downloadFile(url, destPath) {
+  return new Promise((resolve, reject) => {
+    function get(u) {
+      https.get(u, { headers: { 'User-Agent': 'claude-bar-updater' } }, (res) => {
+        if (res.statusCode === 301 || res.statusCode === 302) return get(res.headers.location);
+        const file = fs.createWriteStream(destPath);
+        res.pipe(file);
+        file.on('finish', () => file.close(resolve));
+        file.on('error', (e) => { fs.unlink(destPath, () => {}); reject(e); });
+      }).on('error', reject);
+    }
+    get(url);
+  });
+}
+
+function semverGt(a, b) {
+  const pa = a.replace(/^v/, '').split('.').map(Number);
+  const pb = b.replace(/^v/, '').split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) > (pb[i] || 0)) return true;
+    if ((pa[i] || 0) < (pb[i] || 0)) return false;
+  }
+  return false;
+}
+
+async function checkForUpdates() {
+  tray.setToolTip('Claude Bar — checking…');
+  try {
+    const release = await fetchJSON(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`);
+    tray.setToolTip('Claude Bar');
+
+    if (!release.tag_name) {
+      await dialog.showMessageBox({ message: 'No releases found on GitHub.', buttons: ['OK'] });
+      return;
+    }
+
+    if (!semverGt(release.tag_name, app.getVersion())) {
+      await dialog.showMessageBox({
+        type: 'info',
+        title: 'Claude Bar',
+        message: `You're up to date! (${app.getVersion()})`,
+        buttons: ['OK'],
+      });
+      return;
+    }
+
+    const asset = release.assets.find(a => a.name.includes('arm64') && a.name.endsWith('.dmg'));
+    if (!asset) {
+      await dialog.showMessageBox({
+        type: 'warning',
+        message: `${release.tag_name} is available but no arm64 DMG asset found in this release.`,
+        buttons: ['OK'],
+      });
+      return;
+    }
+
+    const { response } = await dialog.showMessageBox({
+      type: 'info',
+      title: 'Update Available',
+      message: `Claude Bar ${release.tag_name} is available`,
+      detail: `Installed: ${app.getVersion()}\n\nThe app will quit, install the update, and relaunch automatically.`,
+      buttons: ['Install & Relaunch', 'Cancel'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response !== 0) return;
+
+    const dmgPath = path.join(os.tmpdir(), asset.name);
+    tray.setToolTip('Claude Bar — downloading…');
+    await downloadFile(asset.browser_download_url, dmgPath);
+    tray.setToolTip('Claude Bar');
+
+    const scriptPath = path.join(os.tmpdir(), 'claude-bar-update.sh');
+    fs.writeFileSync(scriptPath, [
+      '#!/bin/bash',
+      'sleep 1',
+      `hdiutil attach -nobrowse -quiet "${dmgPath}" -mountpoint /tmp/claude-bar-mnt`,
+      'ditto "/tmp/claude-bar-mnt/Claude Bar.app" "/Applications/Claude Bar.app"',
+      'hdiutil detach /tmp/claude-bar-mnt -quiet',
+      `rm -f "${dmgPath}"`,
+      'rm -f "$0"',
+      'open "/Applications/Claude Bar.app"',
+    ].join('\n'), { mode: 0o755 });
+
+    const child = spawn('bash', [scriptPath], { detached: true, stdio: 'ignore' });
+    child.unref();
+    app.quit();
+
+  } catch (e) {
+    tray.setToolTip('Claude Bar');
+    console.error('update check failed:', e.message);
+    await dialog.showMessageBox({
+      type: 'error',
+      title: 'Claude Bar',
+      message: 'Update check failed',
+      detail: e.message,
+      buttons: ['OK'],
+    });
+  }
+}
+
 function createTray() {
   const icon = nativeImage.createFromPath(path.join(__dirname, 'tray-icon.png'));
   icon.setTemplateImage(true); // macOS auto-colors (white/dark mode aware)
@@ -256,6 +374,8 @@ function createTray() {
         }
       }
     },
+    { type: 'separator' },
+    { label: 'Check for Updates…', click: () => checkForUpdates() },
     { type: 'separator' },
     { label: 'Quit Claude Bar', click: () => app.quit() },
   ]);
