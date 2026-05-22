@@ -330,18 +330,29 @@ async function checkForUpdates() {
     tray.setToolTip('Claude Bar');
 
     const scriptPath = path.join(os.tmpdir(), 'claude-bar-update.sh');
+    const logPath = path.join(os.tmpdir(), 'claude-bar-update.log');
     fs.writeFileSync(scriptPath, [
       '#!/bin/bash',
-      'sleep 1',
-      `hdiutil attach -nobrowse -quiet "${dmgPath}" -mountpoint /tmp/claude-bar-mnt`,
+      `exec > "${logPath}" 2>&1`,
+      'echo "Update started at $(date)"',
+      'sleep 2',
+      'hdiutil detach /tmp/claude-bar-mnt -quiet 2>/dev/null || true',
+      `echo "Attaching: ${dmgPath}"`,
+      `hdiutil attach -nobrowse "${dmgPath}" -mountpoint /tmp/claude-bar-mnt`,
+      'echo "Mounted. Contents:"',
+      'ls /tmp/claude-bar-mnt/',
+      'echo "Copying..."',
       'ditto "/tmp/claude-bar-mnt/Claude Bar.app" "/Applications/Claude Bar.app"',
+      'echo "Copy done, exit $?"',
       'hdiutil detach /tmp/claude-bar-mnt -quiet',
       'xattr -r -d com.apple.quarantine "/Applications/Claude Bar.app" 2>/dev/null || true',
       'touch "/Applications/Claude Bar.app"',
       '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "/Applications/Claude Bar.app"',
       `rm -f "${dmgPath}"`,
       'rm -f "$0"',
+      'echo "Launching..."',
       'open "/Applications/Claude Bar.app"',
+      'echo "Done."',
     ].join('\n'), { mode: 0o755 });
 
     const child = spawn('bash', [scriptPath], { detached: true, stdio: 'ignore' });
