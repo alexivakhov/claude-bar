@@ -129,7 +129,6 @@ function render(data) {
 
 window.claudeBar.onUpdate((data) => render(data));
 
-document.getElementById('closeBtn').addEventListener('click', () => window.close());
 document.getElementById('loginBtn').addEventListener('click', () => window.claudeBar.openLogin());
 document.getElementById('themeBtn').addEventListener('click', cycleTheme);
 document.getElementById('pinBtn').addEventListener('click', togglePin);
