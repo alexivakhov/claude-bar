@@ -1,9 +1,10 @@
-const { app, BrowserWindow, screen, ipcMain, session } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, session, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
 let floatWin;
 let scraperWin;
+let tray;
 let isLoggedIn = false;
 let wasOnAuthPage = false;
 let preventAutoLogin = false;
@@ -230,6 +231,45 @@ ipcMain.on('open-login', async () => {
   }
 });
 
+function createTray() {
+  const icon = nativeImage.createFromPath(path.join(__dirname, 'tray-icon.png'));
+  icon.setTemplateImage(true); // macOS auto-colors (white/dark mode aware)
+  tray = new Tray(icon);
+  tray.setToolTip('Claude Bar');
+
+  const menu = Menu.buildFromTemplate([
+    {
+      label: 'Show / Hide',
+      click: () => {
+        if (floatWin && !floatWin.isDestroyed()) {
+          floatWin.isVisible() ? floatWin.hide() : floatWin.show();
+        }
+      }
+    },
+    {
+      label: 'Log in…',
+      click: () => {
+        if (scraperWin && !scraperWin.isDestroyed()) {
+          scraperWin.webContents.send('open-login');
+          // reuse existing open-login IPC path
+          require('electron').ipcMain.emit('open-login', { sender: null });
+        }
+      }
+    },
+    { type: 'separator' },
+    { label: 'Quit Claude Bar', click: () => app.quit() },
+  ]);
+
+  // left-click: toggle widget visibility
+  tray.on('click', () => {
+    if (floatWin && !floatWin.isDestroyed()) {
+      floatWin.isVisible() ? floatWin.hide() : floatWin.show();
+    }
+  });
+  // right-click: context menu
+  tray.on('right-click', () => tray.popUpContextMenu(menu));
+}
+
 function createFloatWindow() {
   const { width: sw } = screen.getPrimaryDisplay().workAreaSize;
   floatWin = new BrowserWindow({
@@ -258,14 +298,16 @@ function createFloatWindow() {
 }
 
 app.whenReady().then(async () => {
+  app.dock.hide(); // no Dock icon — lives only in the menu bar status area
   cookiePath = path.join(app.getPath('userData'), 'claude-cookies.json');
+  createTray();
   createFloatWindow();
   await createScraper();
 });
 
-app.on('window-all-closed', () => {
-  app.quit();
-});
+// Don't quit when all windows are closed — the tray icon keeps the app alive.
+// The only exit path is Tray → "Quit Claude Bar".
+app.on('window-all-closed', () => { /* intentionally empty */ });
 
 app.on('activate', () => {
   if (floatWin && !floatWin.isDestroyed() && !floatWin.isVisible()) floatWin.show();

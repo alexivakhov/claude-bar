@@ -23,7 +23,9 @@
       "index.html",
       "renderer.js",
       "style.css",
-      "package.json"
+      "package.json",
+      "tray-icon.png",
+      "tray-icon@2x.png"
     ],
     "mac": {
       "category": "public.app-category.productivity",
