@@ -235,17 +235,35 @@ html[data-theme="light"] .bar {
   color: var(--crit);
 }
 
+.plan-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 4px;
+  min-height: 0;
+}
+
+.plan-row:has(.plan-label:empty + .reset-times:empty) {
+  display: none;
+}
+
 .plan-label {
   font-size: 7px;
   color: var(--text-ghost);
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  margin-bottom: 4px;
-  min-height: 0;
+  flex-shrink: 0;
 }
 
-.plan-label:empty {
-  display: none;
+.reset-times {
+  font-size: 7px;
+  color: var(--text-ghost);
+  letter-spacing: 0.04em;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .bars {

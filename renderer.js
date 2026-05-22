@@ -57,6 +57,24 @@ function timeAgo(ts) {
   return `last updated ${Math.round(s / 60)}min ago`;
 }
 
+const RESET_LABEL_MAP = {
+  seven_day: 'All',
+  seven_day_sonnet: 'Snt',
+  seven_day_opus: 'Ops',
+  seven_day_omelette: 'Dsgn',
+  seven_day_cowork: 'Cwk',
+  seven_day_oauth_apps: 'Auth',
+};
+
+function fmtResetTime(resetsAt) {
+  if (!resetsAt) return null;
+  const d = new Date(resetsAt);
+  const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()];
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${day},${hh}:${mm}`;
+}
+
 function fmtDuration(ms) {
   const totalMin = Math.round(ms / 60000);
   const h = Math.floor(totalMin / 60);
@@ -76,11 +94,13 @@ function render(data) {
   const loginBtn = document.getElementById('loginBtn');
 
   const planLabel = document.getElementById('planLabel');
+  const resetTimesEl = document.getElementById('resetTimes');
 
   if (!data || !data.bars || data.bars.length === 0) {
     timer.textContent = '--:--';
     timer.className = 'timer';
     if (planLabel) planLabel.textContent = data?.planName || '';
+    if (resetTimesEl) resetTimesEl.textContent = '';
 
     if (data?.noUsagePage) {
       lastTs = data.fetchedAt;
@@ -112,6 +132,17 @@ function render(data) {
   timer.className = 'timer' + (tc ? ' ' + tc : '');
   updated.textContent = timeAgo(data.fetchedAt);
   if (planLabel) planLabel.textContent = data.planName || '';
+  if (resetTimesEl) {
+    const parts = data.bars
+      .filter(b => b.key !== 'five_hour' && b.resetsAt)
+      .map(b => {
+        const name = RESET_LABEL_MAP[b.key] || b.shortLabel.slice(0, 4);
+        const t = fmtResetTime(b.resetsAt);
+        return t ? `${name}:${t}` : null;
+      })
+      .filter(Boolean);
+    resetTimesEl.textContent = parts.join(' · ');
+  }
 
   barsEl.innerHTML = data.bars.map(bar => {
     const cls = barColor(bar.utilization);
