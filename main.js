@@ -283,31 +283,34 @@ async function checkForUpdates() {
     tray.setToolTip('Claude Bar');
 
     if (!release.tag_name) {
-      await dialog.showMessageBox({ message: 'No releases found on GitHub.', buttons: ['OK'] });
+      await dialog.showMessageBox(floatWin, { message: 'No releases found on GitHub.', buttons: ['OK'] });
+      if (app.dock) app.dock.hide();
       return;
     }
 
     if (!semverGt(release.tag_name, app.getVersion())) {
-      await dialog.showMessageBox({
+      await dialog.showMessageBox(floatWin, {
         type: 'info',
         title: 'Claude Bar',
         message: `You're up to date! (${app.getVersion()})`,
         buttons: ['OK'],
       });
+      if (app.dock) app.dock.hide();
       return;
     }
 
     const asset = release.assets.find(a => a.name.includes('arm64') && a.name.endsWith('.dmg'));
     if (!asset) {
-      await dialog.showMessageBox({
+      await dialog.showMessageBox(floatWin, {
         type: 'warning',
         message: `${release.tag_name} is available but no arm64 DMG asset found in this release.`,
         buttons: ['OK'],
       });
+      if (app.dock) app.dock.hide();
       return;
     }
 
-    const { response } = await dialog.showMessageBox({
+    const { response } = await dialog.showMessageBox(floatWin, {
       type: 'info',
       title: 'Update Available',
       message: `Claude Bar ${release.tag_name} is available`,
@@ -316,6 +319,7 @@ async function checkForUpdates() {
       defaultId: 0,
       cancelId: 1,
     });
+    if (app.dock) app.dock.hide();
     if (response !== 0) return;
 
     const dmgPath = path.join(os.tmpdir(), asset.name);
@@ -330,6 +334,7 @@ async function checkForUpdates() {
       `hdiutil attach -nobrowse -quiet "${dmgPath}" -mountpoint /tmp/claude-bar-mnt`,
       'ditto "/tmp/claude-bar-mnt/Claude Bar.app" "/Applications/Claude Bar.app"',
       'hdiutil detach /tmp/claude-bar-mnt -quiet',
+      'xattr -r -d com.apple.quarantine "/Applications/Claude Bar.app" 2>/dev/null || true',
       'touch "/Applications/Claude Bar.app"',
       '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "/Applications/Claude Bar.app"',
       `rm -f "${dmgPath}"`,
@@ -344,13 +349,14 @@ async function checkForUpdates() {
   } catch (e) {
     tray.setToolTip('Claude Bar');
     console.error('update check failed:', e.message);
-    await dialog.showMessageBox({
+    await dialog.showMessageBox(floatWin, {
       type: 'error',
       title: 'Claude Bar',
       message: 'Update check failed',
       detail: e.message,
       buttons: ['OK'],
     });
+    if (app.dock) app.dock.hide();
   }
 }
 
