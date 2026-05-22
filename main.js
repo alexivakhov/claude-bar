@@ -436,6 +436,9 @@ app.whenReady().then(async () => {
   createTray();
   createFloatWindow();
   await createScraper();
+  // macOS 16 shows a launch-bounce icon even for LSUIElement apps and does
+  // not auto-remove it. Re-hide after the launch animation window (~1s).
+  setTimeout(() => { if (app.dock) app.dock.hide(); }, 1000);
 });
 
 // Don't quit when all windows are closed — the tray icon keeps the app alive.
