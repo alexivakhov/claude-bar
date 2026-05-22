@@ -153,8 +153,6 @@ html[data-theme="light"] .bar {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 7px;
-  padding-right: 20px;
-  /* offset from close button */
 }
 
 .left {
