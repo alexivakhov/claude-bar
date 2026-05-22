@@ -11,11 +11,12 @@ A transparent floating widget for macOS that tracks your Claude.ai usage limits 
 - **Always on top** — borderless, semi-transparent widget that stays above all windows; click `⊤` to send it to the background, `⊥` to pin it back — choice persists across restarts
 - **Real-time usage bars** — session, weekly, and per-model limits with color coding
 - **Plan detection** — automatically reads your plan (Free, Pro, Max, Team, Enterprise) from the API
-- **Smart colors** — green → yellow → blinking red as limits approach
+- **Smart colors** — blue → yellow → red as limits fill up (0–34% / 35–79% / 80–100%)
 - **3 color themes** — Dark, Light, and Mauve — click `◑` in the footer to cycle; choice persists across restarts
 - **Resizable** — drag the bottom-right corner to scale the widget up or down proportionally
 - **Session persistence** — logs in once, remembers your session across restarts
 - **Auto-polling** — syncs data every 2 minutes
+- **Auto-update** — built-in updater via _Check for Updates…_ in the tray menu
 
 ## Installation
 
@@ -36,7 +37,17 @@ Download the latest `.dmg` from the [Releases](https://github.com/alexivakhov/cl
 |--------|--------|
 | `◑` | Cycle color theme (Dark → Light → Mauve) |
 | `⊤` / `⊥` | Toggle always-on-top. `⊤` = pinned above all windows; `⊥` = normal window (other windows can cover it) |
-| `↗ log in` | Open login / log out |
+| `↗ log in` / `↗ log out` | Open login or log out |
+
+## Tray menu
+
+Right-click the tray icon to access:
+
+| Item | Action |
+|------|--------|
+| Show / Hide | Toggle widget visibility |
+| Check for Updates… | Download and install the latest release automatically |
+| Quit | Exit the app |
 
 ## Themes
 
@@ -74,10 +85,20 @@ scraperWin preload
 
 ## Color coding
 
+### Progress bars
+
+| Color | Usage |
+|-------|-------|
+| 🔵 Blue | 0–34% |
+| 🟡 Yellow | 35–79% |
+| 🔴 Red | 80–100% |
+
+### Timer & dot
+
 | State | Condition |
 |-------|-----------|
-| 🔴 Critical (blinking) | < 15 min remaining or ≥ 90% used |
-| 🟡 Warning | ≤ 45 min remaining or ≥ 70% used |
+| 🔴 Critical (blinking) | < 15 min remaining |
+| 🟡 Warning | ≤ 45 min remaining |
 | 🟢 OK | everything else |
 
 ## Google OAuth fixes (vs original repo)
@@ -112,6 +133,7 @@ npm run dist -- --arm64
 - Usage bars are rendered dynamically from any JSON field with a `utilization` number — new Claude model limits appear automatically without code changes
 - Resize: dragging the corner updates `body.style.zoom` synchronously on every `mousemove` before the IPC call completes, so content and window frame scale together without lag
 - Themes: CSS custom properties on `:root` + `html[data-theme]` overrides in `style.css`; flash-free loading via inline `<script>` in `<head>` that reads `localStorage` before first paint
+- Dock icon: `LSUIElement = true` in `Info.plist` (set via `afterPack` hook) + `app.dock.hide()` at startup. All `dialog.showMessageBox()` calls pass `floatWin` as parent to prevent macOS from re-showing the Dock icon internally
 
 ## Credits
 
