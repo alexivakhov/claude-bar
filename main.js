@@ -185,7 +185,8 @@ async function createScraper() {
   // OAuth popups (Google/Apple login): must share the same partition so
   // auth cookies land in scraper-temp, not in a separate default session.
   // S4: Only allow popups from trusted OAuth hosts.
-  scraperWin.webContents.setWindowOpenHandler(({ url }) => {
+  scraperWin.webContents.setWindowOpenHandler(({ url, frameName, disposition }) => {
+    console.log(`popup request: url=${url || '(empty)'} frame=${frameName} disposition=${disposition}`);
     if (!isAllowedPopupHost(url)) {
       console.warn('setWindowOpenHandler: denied popup for', url);
       return { action: 'deny' };
@@ -204,11 +205,22 @@ async function createScraper() {
     };
   });
 
-  scraperWin.webContents.on('did-create-window', (popup) => {
+  scraperWin.webContents.on('did-create-window', (popup, details) => {
+    console.log('popup created:', details && details.url);
     popup.webContents.setUserAgent(CHROME_UA);
+    popup.webContents.on('did-navigate', (_, u) => console.log('popup navigate:', u));
     popup.once('closed', async () => {
-      if (!preventAutoLogin) {
-        await new Promise(r => setTimeout(r, 500));
+      console.log('popup closed, preventAutoLogin =', preventAutoLogin);
+      if (preventAutoLogin) return;
+      // The opener page finishes the OAuth code exchange asynchronously after
+      // the popup closes — reloading too early kills the in-flight request and
+      // the session cookie is never set. Let the SPA complete login and
+      // redirect itself; reload only as a fallback if still stuck on auth.
+      await new Promise(r => setTimeout(r, 8000));
+      if (!scraperWin || scraperWin.isDestroyed()) return;
+      const cur = scraperWin.webContents.getURL();
+      if (AUTH_PATTERNS.some(p => cur.includes(p))) {
+        console.log('still on auth page after popup close — reloading /new');
         scraperWin.loadURL('https://claude.ai/new');
       }
     });
