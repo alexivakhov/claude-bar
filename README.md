@@ -29,7 +29,7 @@ Download the latest `.dmg` from the [Releases](https://github.com/alexivakhov/cl
 | | |
 |---|---|
 | **OS** | macOS 12 Monterey or later |
-| **Arch** | Apple Silicon (M1 / M2 / M3 / M4) |
+| **Arch** | Apple Silicon (arm64) or Intel (x64) |
 
 ## Footer controls
 
@@ -71,7 +71,7 @@ Two Electron windows:
 **Data flow:**
 
 ```
-scraperWin preload
+preload-scraper.js poll() [every 2 minutes]
   → fetch /api/organizations              → org UUID + capabilities[] → plan name
   → fetch /api/organizations/{id}/usage   → usage limits as JSON
   → ipcRenderer.send('usage:update', data)
@@ -81,7 +81,9 @@ scraperWin preload
 
 **Plan detection** reads `org.capabilities[]` from the organizations API — the field that actually reflects the subscription (`claude_pro`, `claude_max`, etc.), not `rate_limit_tier` which is a technical rate-limit category.
 
-**Cookie persistence** — cookies are saved manually to `{userData}/claude-cookies.json` after each successful fetch and restored on startup. No LevelDB / `persist:` partition used, which avoids lock conflicts on quick restarts.
+**Session countdown** — the timer in the widget is updated every 30 seconds locally from the `resetsAt` timestamp received at poll time, so it counts down smoothly between 2-minute polls.
+
+**Cookie persistence** — cookies are saved to `{userData}/claude-cookies.json`, encrypted via Electron's `safeStorage` (OS keychain-backed). No LevelDB / `persist:` partition used, which avoids lock conflicts on quick restarts.
 
 ## Color coding
 
@@ -118,7 +120,7 @@ npm run dist -- --arm64
 
 ## Architecture notes
 
-- Polling interval: **2 minutes** (in `preload-scraper.js`)
+- Polling interval: **2 minutes** (in `preload-scraper.js`); timer display refreshes locally every **30 seconds** from the `resetsAt` absolute timestamp
 - Scraper session: **in-memory partition** (`scraper-temp`, no `persist:` prefix) — avoids LevelDB lock errors on rapid restarts
 - Usage bars are rendered dynamically from any JSON field with a `utilization` number — new Claude model limits appear automatically without code changes
 - Resize: dragging the corner updates `body.style.zoom` synchronously on every `mousemove` before the IPC call completes, so content and window frame scale together without lag
