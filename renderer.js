@@ -272,6 +272,7 @@ setInterval(() => {
     }
   }
   // B5: Recompute timer from absolute resetsAt
+  console.log('tick: refreshing countdown');
   updateTimerFromResetsAt();
 }, 30000);
 

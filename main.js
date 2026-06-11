@@ -174,6 +174,8 @@ async function createScraper() {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload-scraper.js'),
       partition: SCRAPER_PARTITION,
+      // Hidden window — don't let Chromium throttle the 2-min poll timer.
+      backgroundThrottling: false,
     }
   });
 
@@ -632,10 +634,16 @@ function createFloatWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js')
+      preload: path.join(__dirname, 'preload.js'),
+      // Transparent frameless windows can be treated as occluded by Chromium,
+      // which throttles their timers — the live countdown stops ticking.
+      backgroundThrottling: false,
     }
   });
   floatWin.loadFile('index.html');
+  floatWin.webContents.on('console-message', (_, level, message) => {
+    console.log('[widget]', message);
+  });
   floatWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
 }
 
