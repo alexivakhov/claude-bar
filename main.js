@@ -138,8 +138,10 @@ async function openLogin() {
 }
 
 // Spoof Chrome UA so Google OAuth doesn't reject the Electron embedded browser.
+// Chrome version must match the bundled Chromium — a mismatch between the UA
+// string and the real TLS/JS fingerprint triggers Cloudflare bot challenges.
 const CHROME_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ' +
-  'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+  `AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome.split('.')[0]}.0.0.0 Safari/537.36`;
 
 // S4: Allowed OAuth popup hosts
 const ALLOWED_POPUP_HOSTS = [
