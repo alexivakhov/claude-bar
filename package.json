@@ -30,6 +30,7 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
       "target": [
         {
           "target": "dmg",
