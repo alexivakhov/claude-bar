@@ -294,6 +294,24 @@ html[data-theme="light"] .bar {
   flex-shrink: 0;
 }
 
+.update-banner {
+  display: none;
+  font-size: 8px;
+  color: var(--accent);
+  text-align: center;
+  padding: 3px 0 0;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.update-banner:hover {
+  color: var(--accent-light);
+}
+
+.update-banner.visible {
+  display: block;
+}
+
 .footer {
   display: flex;
   justify-content: space-between;

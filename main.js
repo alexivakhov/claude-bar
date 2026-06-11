@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen, ipcMain, session, Tray, Menu, nativeImage, dialog, safeStorage } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, session, Tray, Menu, nativeImage, dialog, safeStorage, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
@@ -16,6 +16,28 @@ let cookiePath;
 // Backoff state for did-fail-load retries
 let failLoadRetryTimeout = null;
 let failLoadRetryDelay = 30000; // start at 30s, double up to 5min
+
+// Persisted user settings ({userData}/settings.json)
+let settingsPath;
+const settings = {
+  pollIntervalMin: 2,
+  notifyThresholds: true,
+  notifySessionReset: true,
+};
+
+function loadSettings() {
+  try {
+    Object.assign(settings, JSON.parse(fs.readFileSync(settingsPath, 'utf8')));
+  } catch {}
+}
+
+function saveSettings() {
+  try {
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+  } catch (e) {
+    console.error('saveSettings error:', e.message);
+  }
+}
 
 // Hide Dock icon at every possible lifecycle point — app.dock.hide() may be
 // ignored if called before the app is fully initialized on some macOS versions.
@@ -128,6 +150,7 @@ async function logout() {
 async function openLogin() {
   if (scraperWin && !scraperWin.isDestroyed()) {
     await logout();
+    updateTrayTitle(null);
     if (floatWin && !floatWin.isDestroyed()) {
       floatWin.webContents.send('usage-update', { bars: [] });
     }
@@ -343,12 +366,58 @@ ipcMain.on('pin-toggle', (event, pinned) => {
   floatWin.setAlwaysOnTop(pinned);
 });
 
+// Feature 1: utilization % in the menubar next to the tray icon.
+// Shows the most constrained (highest) bar — that's the limit you'll hit first.
+function updateTrayTitle(data) {
+  if (!tray) return;
+  if (!data || !Array.isArray(data.bars) || data.bars.length === 0) {
+    tray.setTitle('');
+    return;
+  }
+  const max = Math.max(...data.bars.map(b => b.utilization));
+  tray.setTitle(` ${Math.round(max)}%`, { fontType: 'monospacedDigit' });
+}
+
+// Feature 2: system notifications on threshold crossings and session reset.
+const NOTIFY_THRESHOLDS = [80, 95];
+const prevUtilization = {}; // bar key -> last seen utilization
+function checkUsageNotifications(data) {
+  if (!Array.isArray(data.bars)) return;
+  for (const bar of data.bars) {
+    const prev = prevUtilization[bar.key];
+    if (prev !== undefined && Notification.isSupported()) {
+      if (settings.notifyThresholds) {
+        for (const t of NOTIFY_THRESHOLDS) {
+          if (prev < t && bar.utilization >= t) {
+            new Notification({
+              title: `Claude Bar — ${bar.label}`,
+              body: `Usage reached ${Math.round(bar.utilization)}% (threshold ${t}%)`,
+            }).show();
+            break; // one notification per bar per poll is enough
+          }
+        }
+      }
+      // Session reset: utilization dropped from high back to near zero
+      if (settings.notifySessionReset && bar.key === 'five_hour' &&
+          prev >= 50 && bar.utilization < 10) {
+        new Notification({
+          title: 'Claude Bar',
+          body: 'Session limit reset — you can work again.',
+        }).show();
+      }
+    }
+    prevUtilization[bar.key] = bar.utilization;
+  }
+}
+
 ipcMain.on('usage:update', async (event, data) => {
   if (!scraperWin || scraperWin.isDestroyed() || event.sender !== scraperWin.webContents) {
     console.warn('usage:update: ignored from unexpected sender');
     return;
   }
   await saveCookies();
+  updateTrayTitle(data);
+  checkUsageNotifications(data);
   if (floatWin && !floatWin.isDestroyed()) {
     floatWin.webContents.send('usage-update', data);
   }
@@ -371,6 +440,7 @@ ipcMain.on('usage:error', async (event, err) => {
   if (err.reauth && isLoggedIn) {
     isLoggedIn = false;
     clearCookies();
+    updateTrayTitle(null);
     if (floatWin && !floatWin.isDestroyed()) {
       floatWin.webContents.send('usage-update', { bars: [] });
     }
@@ -385,6 +455,42 @@ ipcMain.on('usage:error', async (event, err) => {
 // B4: ipcMain handler uses named openLogin()
 ipcMain.on('open-login', async () => {
   await openLogin();
+});
+
+// Feature 4: manual refresh from the widget
+function triggerPoll() {
+  if (scraperWin && !scraperWin.isDestroyed()) {
+    scraperWin.webContents.executeJavaScript('window.usageApi && window.usageApi.poll()').catch(() => {});
+  }
+}
+
+ipcMain.on('manual-refresh', (event) => {
+  if (!floatWin || event.sender !== floatWin.webContents) return;
+  triggerPoll();
+});
+
+// Feature 4: scraper preload asks for the configured poll interval on startup
+ipcMain.handle('get-poll-interval', () => settings.pollIntervalMin * 60 * 1000);
+
+function applyPollInterval(min) {
+  settings.pollIntervalMin = min;
+  saveSettings();
+  if (scraperWin && !scraperWin.isDestroyed()) {
+    scraperWin.webContents.send('poll-config', min * 60 * 1000);
+  }
+  sendConfigToWidget();
+}
+
+function sendConfigToWidget() {
+  if (floatWin && !floatWin.isDestroyed()) {
+    floatWin.webContents.send('config-update', { pollIntervalMin: settings.pollIntervalMin });
+  }
+}
+
+// Feature 5: clicking the in-widget update banner starts the normal update flow
+ipcMain.on('install-update', (event) => {
+  if (!floatWin || event.sender !== floatWin.webContents) return;
+  checkForUpdates();
 });
 
 // B3: fetchJSON with redirect limit, status check, and error body
@@ -578,13 +684,25 @@ async function checkForUpdates() {
   }
 }
 
-function createTray() {
-  const icon = nativeImage.createFromPath(path.join(__dirname, 'tray-icon.png'));
-  icon.setTemplateImage(true); // macOS auto-colors (white/dark mode aware)
-  tray = new Tray(icon);
-  tray.setToolTip('Claude Bar');
+// Feature 5: silent daily update check — no dialogs, just a banner in the widget.
+async function quietUpdateCheck() {
+  try {
+    const release = await fetchJSON(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`);
+    if (release.tag_name && semverGt(release.tag_name, app.getVersion())) {
+      console.log('quiet update check: update available', release.tag_name);
+      if (floatWin && !floatWin.isDestroyed()) {
+        floatWin.webContents.send('update-available', { version: release.tag_name });
+      }
+    }
+  } catch (e) {
+    console.log('quiet update check failed:', e.message);
+  }
+}
 
-  const menu = Menu.buildFromTemplate([
+// Menu is rebuilt on demand so checkbox/radio states always reflect settings.
+function buildTrayMenu() {
+  const POLL_CHOICES = [1, 2, 5, 10];
+  return Menu.buildFromTemplate([
     {
       label: 'Show / Hide',
       click: () => {
@@ -599,10 +717,46 @@ function createTray() {
       click: () => openLogin(),
     },
     { type: 'separator' },
+    {
+      label: 'Refresh Interval',
+      submenu: POLL_CHOICES.map(min => ({
+        label: `${min} min`,
+        type: 'radio',
+        checked: settings.pollIntervalMin === min,
+        click: () => applyPollInterval(min),
+      })),
+    },
+    {
+      label: 'Notify at 80% / 95%',
+      type: 'checkbox',
+      checked: settings.notifyThresholds,
+      click: (item) => { settings.notifyThresholds = item.checked; saveSettings(); },
+    },
+    {
+      label: 'Notify on Session Reset',
+      type: 'checkbox',
+      checked: settings.notifySessionReset,
+      click: (item) => { settings.notifySessionReset = item.checked; saveSettings(); },
+    },
+    {
+      // Feature 3: launch at login, toggleable
+      label: 'Launch at Login',
+      type: 'checkbox',
+      checked: app.getLoginItemSettings().openAtLogin,
+      click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }),
+    },
+    { type: 'separator' },
     { label: 'Check for Updates…', click: () => checkForUpdates() },
     { type: 'separator' },
     { label: 'Quit Claude Bar', click: () => app.quit() },
   ]);
+}
+
+function createTray() {
+  const icon = nativeImage.createFromPath(path.join(__dirname, 'tray-icon.png'));
+  icon.setTemplateImage(true); // macOS auto-colors (white/dark mode aware)
+  tray = new Tray(icon);
+  tray.setToolTip('Claude Bar');
 
   // left-click: toggle widget visibility
   tray.on('click', () => {
@@ -610,8 +764,8 @@ function createTray() {
       floatWin.isVisible() ? floatWin.hide() : floatWin.show();
     }
   });
-  // right-click: context menu
-  tray.on('right-click', () => tray.popUpContextMenu(menu));
+  // right-click: context menu (rebuilt each time so states are current)
+  tray.on('right-click', () => tray.popUpContextMenu(buildTrayMenu()));
 }
 
 function createFloatWindow() {
@@ -641,8 +795,8 @@ function createFloatWindow() {
     }
   });
   floatWin.loadFile('index.html');
-  floatWin.webContents.on('console-message', (_, level, message) => {
-    console.log('[widget]', message);
+  floatWin.webContents.on('console-message', (event, level, message) => {
+    console.log('[widget]', event.message !== undefined ? event.message : message);
   });
   floatWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
 }
@@ -650,12 +804,19 @@ function createFloatWindow() {
 app.whenReady().then(async () => {
   if (app.dock) app.dock.hide();
   cookiePath = path.join(app.getPath('userData'), 'claude-cookies.json');
+  settingsPath = path.join(app.getPath('userData'), 'settings.json');
+  loadSettings();
   createTray();
   createFloatWindow();
+  floatWin.webContents.once('did-finish-load', sendConfigToWidget);
   await createScraper();
   // macOS 16 shows a launch-bounce icon even for LSUIElement apps and does
   // not auto-remove it. Re-hide after the launch animation window (~1s).
   setTimeout(() => { if (app.dock) app.dock.hide(); }, 1000);
+
+  // Feature 5: check once shortly after launch, then daily
+  setTimeout(quietUpdateCheck, 60 * 1000);
+  setInterval(quietUpdateCheck, 24 * 60 * 60 * 1000);
 });
 
 // Don't quit when all windows are closed — the tray icon keeps the app alive.

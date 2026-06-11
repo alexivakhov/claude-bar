@@ -140,6 +140,18 @@ async function poll() {
 
 contextBridge.exposeInMainWorld('usageApi', { poll, refresh: poll });
 
-const POLL_INTERVAL_MS = 2 * 60 * 1000;
-setInterval(poll, POLL_INTERVAL_MS);
+// Poll interval is user-configurable (tray menu → Refresh Interval)
+const DEFAULT_POLL_INTERVAL_MS = 2 * 60 * 1000;
+let pollTimer = null;
+
+function armPoll(ms) {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(poll, ms);
+}
+
+ipcRenderer.on('poll-config', (_, ms) => armPoll(ms));
+
+ipcRenderer.invoke('get-poll-interval')
+  .then(ms => armPoll(ms || DEFAULT_POLL_INTERVAL_MS))
+  .catch(() => armPoll(DEFAULT_POLL_INTERVAL_MS));
 poll();

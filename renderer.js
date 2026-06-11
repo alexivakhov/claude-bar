@@ -94,6 +94,8 @@ let lastTs = null;
 let lastData = null;
 // B7b: Track if we're in error/stale state
 let isStale = false;
+// Poll interval (minutes), pushed from main via config-update
+let pollIntervalMin = 2;
 
 // B8: Request window resize based on actual content height
 function requestFitResize() {
@@ -200,7 +202,7 @@ function render(data) {
       lastTs = null;
       dot.className = 'dot load';
       barsEl.innerHTML = '<div class="no-data">loading...</div>';
-      updated.textContent = 'refreshing every 2min';
+      updated.textContent = `refreshing every ${pollIntervalMin}min`;
       loginBtn.textContent = '↗ log in';
     }
     requestFitResize();
@@ -258,9 +260,30 @@ window.claudeBar.onError((err) => {
   updated.textContent = base + ' · offline';
 });
 
+// Feature 4: poll interval pushed from main (tray menu setting)
+window.claudeBar.onConfig((cfg) => {
+  if (cfg && cfg.pollIntervalMin) pollIntervalMin = cfg.pollIntervalMin;
+});
+
+// Feature 5: quiet update banner — click to install
+window.claudeBar.onUpdateAvailable((info) => {
+  const banner = document.getElementById('updateBanner');
+  banner.textContent = `↑ ${info.version} available — install`;
+  banner.classList.add('visible');
+  requestFitResize();
+});
+
+document.getElementById('updateBanner').addEventListener('click', () => window.claudeBar.installUpdate());
+
 document.getElementById('loginBtn').addEventListener('click', () => window.claudeBar.openLogin());
 document.getElementById('themeBtn').addEventListener('click', cycleTheme);
 document.getElementById('pinBtn').addEventListener('click', togglePin);
+
+// Feature 4: manual refresh — spin the dot to "loading" until the next update
+document.getElementById('refreshBtn').addEventListener('click', () => {
+  document.getElementById('dot').className = 'dot load';
+  window.claudeBar.refresh();
+});
 
 // B5: Every 30s, refresh timer display from resetsAt; also refresh timeAgo
 setInterval(() => {
