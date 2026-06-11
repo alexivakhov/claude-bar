@@ -50,11 +50,16 @@ function fmt(mins) {
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}` : `0:${String(m).padStart(2, '0')}`;
 }
 
+// B9a: show hours when >= 60 min ("1h 5min ago" style)
 function timeAgo(ts) {
   if (!ts) return '—';
   const s = Math.round((Date.now() - ts) / 1000);
   if (s < 60) return `last updated ${s}s ago`;
-  return `last updated ${Math.round(s / 60)}min ago`;
+  const totalMin = Math.round(s / 60);
+  if (totalMin < 60) return `last updated ${totalMin}min ago`;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return m > 0 ? `last updated ${h}h ${m}min ago` : `last updated ${h}h ago`;
 }
 
 const RESET_LABEL_MAP = {
@@ -85,6 +90,85 @@ function fmtDuration(ms) {
 }
 
 let lastTs = null;
+// B5: Store last received data so we can recompute timer locally
+let lastData = null;
+// B7b: Track if we're in error/stale state
+let isStale = false;
+
+// B8: Request window resize based on actual content height
+function requestFitResize() {
+  const zoom = window.innerWidth / BASE_W;
+  const contentH = document.body.scrollHeight;
+  const desired = Math.round(contentH * zoom);
+  window.claudeBar.resize(window.innerWidth, desired);
+}
+
+// B5: Update just the timer and its color classes from resetsAt without re-rendering bars
+function updateTimerFromResetsAt() {
+  if (!lastData || !lastData.bars || lastData.bars.length === 0) return;
+  const timer = document.getElementById('timer');
+  const dot = document.getElementById('dot');
+  const sessionBar = lastData.bars.find(b => b.key === 'five_hour') || lastData.bars[0];
+  if (!sessionBar || sessionBar.resetsAt === null || sessionBar.resetsAt === undefined) return;
+
+  const msLeft = Math.max(0, new Date(sessionBar.resetsAt).getTime() - Date.now());
+  const resetMins = Math.round(msLeft / 60000);
+  const tc = colorClass(resetMins);
+  dot.className = 'dot' + (tc ? ' ' + tc : ' ok');
+  timer.textContent = fmt(resetMins);
+  timer.className = 'timer' + (tc ? ' ' + tc : '');
+
+  // Also refresh the tooltip durations in bar rows (walk DOM)
+  const barsEl = document.getElementById('bars');
+  const rows = barsEl.querySelectorAll('.bar-row');
+  rows.forEach((row, i) => {
+    const bar = lastData.bars[i];
+    if (!bar) return;
+    const msLeft2 = bar.resetsAt
+      ? Math.max(0, new Date(bar.resetsAt).getTime() - Date.now())
+      : null;
+    row.title = msLeft2 !== null
+      ? `${bar.label} — resets in ${fmtDuration(msLeft2)}`
+      : bar.label;
+  });
+}
+
+// S5: Build a bar row with DOM nodes (no innerHTML for dynamic strings)
+function buildBarRow(bar) {
+  const msLeft = bar.resetsAt
+    ? Math.max(0, new Date(bar.resetsAt).getTime() - Date.now())
+    : null;
+  const tooltip = msLeft !== null
+    ? `${bar.label} — resets in ${fmtDuration(msLeft)}`
+    : bar.label;
+
+  const row = document.createElement('div');
+  row.className = 'bar-row';
+  row.title = tooltip; // title property = safe, no injection
+
+  const nameSpan = document.createElement('span');
+  nameSpan.className = 'bar-name';
+  nameSpan.textContent = bar.shortLabel; // textContent = safe
+
+  const track = document.createElement('div');
+  track.className = 'track';
+
+  const fill = document.createElement('div');
+  const cls = barColor(bar.utilization);
+  fill.className = 'fill' + (cls ? ' ' + cls : '');
+  fill.style.width = bar.utilization + '%';
+
+  track.appendChild(fill);
+
+  const pct = document.createElement('span');
+  pct.className = 'pct';
+  pct.textContent = Math.round(bar.utilization) + '%'; // safe number
+
+  row.appendChild(nameSpan);
+  row.appendChild(track);
+  row.appendChild(pct);
+  return row;
+}
 
 function render(data) {
   const dot = document.getElementById('dot');
@@ -96,7 +180,11 @@ function render(data) {
   const planLabel = document.getElementById('planLabel');
   const resetTimesEl = document.getElementById('resetTimes');
 
+  // Clear stale indicator on fresh render
+  isStale = false;
+
   if (!data || !data.bars || data.bars.length === 0) {
+    lastData = null;
     timer.textContent = '--:--';
     timer.className = 'timer';
     if (planLabel) planLabel.textContent = data?.planName || '';
@@ -115,16 +203,20 @@ function render(data) {
       updated.textContent = 'refreshing every 2min';
       loginBtn.textContent = '↗ log in';
     }
+    requestFitResize();
     return;
   }
 
+  lastData = data;
   loginBtn.textContent = '↗ log out';
   lastTs = data.fetchedAt;
 
   const sessionBar = data.bars.find(b => b.key === 'five_hour') || data.bars[0];
-  const resetMins = sessionBar && sessionBar.msUntilReset !== null
-    ? Math.round(sessionBar.msUntilReset / 60000)
+  // B5: compute from resetsAt (absolute time) rather than stale msUntilReset
+  const msLeft = sessionBar && sessionBar.resetsAt
+    ? Math.max(0, new Date(sessionBar.resetsAt).getTime() - Date.now())
     : null;
+  const resetMins = msLeft !== null ? Math.round(msLeft / 60000) : null;
 
   const tc = colorClass(resetMins);
   dot.className = 'dot' + (tc ? ' ' + tc : ' ok');
@@ -144,33 +236,46 @@ function render(data) {
     resetTimesEl.textContent = parts.join(' · ');
   }
 
-  barsEl.innerHTML = data.bars.map(bar => {
-    const cls = barColor(bar.utilization);
-    const tooltip = bar.msUntilReset
-      ? `${bar.label} — resets in ${fmtDuration(bar.msUntilReset)}`
-      : bar.label;
-    return `
-      <div class="bar-row" title="${tooltip}">
-        <span class="bar-name">${bar.shortLabel}</span>
-        <div class="track"><div class="fill ${cls}" style="width:${bar.utilization}%"></div></div>
-        <span class="pct">${Math.round(bar.utilization)}%</span>
-      </div>`;
-  }).join('');
+  // S5: Build bar rows via DOM API (no innerHTML with dynamic strings)
+  barsEl.textContent = ''; // clear existing rows safely
+  for (const bar of data.bars) {
+    barsEl.appendChild(buildBarRow(bar));
+  }
+
+  requestFitResize();
 }
 
 window.claudeBar.onUpdate((data) => render(data));
+
+// B7b: Handle poll errors — show stale indicator
+window.claudeBar.onError((err) => {
+  isStale = true;
+  const dot = document.getElementById('dot');
+  const updated = document.getElementById('updated');
+  // Set dot to idle/grey
+  dot.className = 'dot';
+  const base = lastTs ? timeAgo(lastTs) : 'last updated —';
+  updated.textContent = base + ' · offline';
+});
 
 document.getElementById('loginBtn').addEventListener('click', () => window.claudeBar.openLogin());
 document.getElementById('themeBtn').addEventListener('click', cycleTheme);
 document.getElementById('pinBtn').addEventListener('click', togglePin);
 
+// B5: Every 30s, refresh timer display from resetsAt; also refresh timeAgo
 setInterval(() => {
-  if (lastTs) document.getElementById('updated').textContent = timeAgo(lastTs);
-}, 60000);
+  if (lastTs) {
+    const updated = document.getElementById('updated');
+    // Only overwrite if not currently showing stale message (isStale handled in onError)
+    if (!isStale) {
+      updated.textContent = timeAgo(lastTs);
+    }
+  }
+  // B5: Recompute timer from absolute resetsAt
+  updateTimerFromResetsAt();
+}, 30000);
 
 const BASE_W = 224;
-const BASE_H = 150;
-const ASPECT = BASE_W / BASE_H;
 
 function applyScale() {
   document.body.style.zoom = window.innerWidth / BASE_W;
@@ -192,7 +297,10 @@ applyScale();
       if (!active) return;
       const newW = Math.max(180, Math.min(500, ow + e.screenX - ox));
       document.body.style.zoom = newW / BASE_W;
-      window.claudeBar.resize(newW, Math.round(newW / ASPECT));
+      // B8: compute height from actual content, not fixed aspect ratio
+      const zoom = newW / BASE_W;
+      const contentH = document.body.scrollHeight;
+      window.claudeBar.resize(newW, Math.round(contentH * zoom));
     }
     function onUp() {
       active = false;

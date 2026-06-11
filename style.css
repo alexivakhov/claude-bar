@@ -122,31 +122,6 @@ html[data-theme="light"] .bar {
   opacity: 1;
 }
 
-/* Standard red close button */
-.close-btn {
-  position: absolute;
-  top: 8px;
-  right: 10px;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #ff5f57;
-  border: 1px solid #e0443e;
-  cursor: pointer;
-  -webkit-app-region: no-drag;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: opacity .15s;
-}
-
-.close-btn:hover::after {
-  content: '×';
-  font-size: 10px;
-  color: #7a0000;
-  line-height: 1;
-  margin-top: -1px;
-}
 
 .top-row {
   display: flex;
