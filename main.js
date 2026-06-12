@@ -393,6 +393,11 @@ async function createScraper() {
 }
 
 // S6: Validate IPC senders
+// Resize range: width 360–820, height follows content (capped at 640 so the
+// history screen fits at max width without clipping)
+const WIN_MIN_W = 360, WIN_MAX_W = 820;
+const WIN_MIN_H = 160, WIN_MAX_H = 640;
+
 ipcMain.on('window-resize', (event, { w, h }) => {
   if (!floatWin || floatWin.isDestroyed()) return;
   if (event.sender !== floatWin.webContents) {
@@ -400,9 +405,8 @@ ipcMain.on('window-resize', (event, { w, h }) => {
     return;
   }
   floatWin.setSize(
-    Math.round(Math.max(180, Math.min(500, w))),
-    // B8: clamp consistent with maxHeight 560 (history screen is taller than bars)
-    Math.round(Math.max(100, Math.min(560, h)))
+    Math.round(Math.max(WIN_MIN_W, Math.min(WIN_MAX_W, w))),
+    Math.round(Math.max(WIN_MIN_H, Math.min(WIN_MAX_H, h)))
   );
 });
 
@@ -829,19 +833,19 @@ function createTray() {
 function createFloatWindow() {
   const { width: sw } = screen.getPrimaryDisplay().workAreaSize;
   floatWin = new BrowserWindow({
-    width: 224,
-    height: 150,
-    x: sw - 240,
+    width: WIN_MIN_W,
+    height: 240,
+    x: sw - WIN_MIN_W - 16,
     y: 16,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
     skipTaskbar: false,
     resizable: true,
-    minWidth: 180,
-    minHeight: 120,
-    maxWidth: 500,
-    maxHeight: 560,
+    minWidth: WIN_MIN_W,
+    minHeight: WIN_MIN_H,
+    maxWidth: WIN_MAX_W,
+    maxHeight: WIN_MAX_H,
     hasShadow: true,
     webPreferences: {
       nodeIntegration: false,
