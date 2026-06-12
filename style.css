@@ -406,7 +406,7 @@ html[data-theme="light"] .bar {
 
 .sparkline {
   width: 100%;
-  height: 56px;
+  height: 64px;
   display: block;
   color: var(--text-ghost);
   margin-bottom: 3px;

@@ -169,79 +169,152 @@ function mksvg(tag, attrs) {
   return el;
 }
 
+function fmtClock(ts) {
+  const d = new Date(ts);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 function renderSparklineSVG(svgEl, points, barKey) {
-  const W = 200, H = 56;
+  const W = 200, H = 64;
+  const PAD_T = 4, PAD_B = 10; // bottom strip for time labels
   svgEl.textContent = '';
   svgEl.setAttribute('viewBox', `0 0 ${W} ${H}`);
 
-  const displayMs = barKey === 'five_hour' ? 6 * 3600000 : 24 * 3600000;
+  const maxWindowMs = barKey === 'five_hour' ? 6 * 3600000 : 24 * 3600000;
   const now = Date.now();
-  const tStart = now - displayMs;
-  // Extend 25% into the future for the forecast area
-  const tEnd = now + displayMs * 0.25;
-  const range = tEnd - tStart;
-
-  const tx = (ts) => ((ts - tStart) / range) * W;
-  const ty = (u) => H * 0.05 + (1 - Math.min(1, Math.max(0, u / 100))) * H * 0.90;
-
-  const visible = points.filter(([ts]) => ts >= tStart);
+  const visible = points.filter(([ts]) => ts >= now - maxWindowMs);
 
   if (visible.length < 2) {
     const txt = mksvg('text', {
       x: W / 2, y: H / 2 + 3, 'text-anchor': 'middle',
       fill: 'currentColor', 'font-size': 9, 'font-family': 'SF Mono, Menlo, monospace',
     });
-    txt.textContent = 'no data yet';
+    txt.textContent = 'collecting data…';
     svgEl.appendChild(txt);
     return;
   }
 
-  // Subtle "now" guide line at the boundary between history and forecast
+  // Fit the time axis to the data instead of a fixed window: start at the
+  // first visible point (min 30 min span so early points don't fill the
+  // whole width), forecast region at most as wide as the history.
+  const histSpan = Math.max(now - visible[0][0], 30 * 60000);
+  const tStart = now - histSpan;
+
+  const rate = computeBurnRate(points, barKey);
+  const last = visible[visible.length - 1];
+  const tsLimit = rate && rate > 0.5
+    ? last[0] + (100 - last[1]) / rate * 3600000
+    : null;
+  const tEnd = tsLimit
+    ? Math.min(tsLimit + histSpan * 0.05, now + histSpan)
+    : now + histSpan * 0.15;
+  const range = tEnd - tStart;
+
+  const tx = (ts) => ((ts - tStart) / range) * W;
+  const plotH = H - PAD_T - PAD_B;
+  const ty = (u) => PAD_T + (1 - Math.min(1, Math.max(0, u / 100))) * plotH;
+
+  // Gridlines at 0 / 50 / 100% with tiny labels
+  for (const lvl of [0, 50, 100]) {
+    const gy = ty(lvl).toFixed(1);
+    svgEl.appendChild(mksvg('line', {
+      x1: 0, y1: gy, x2: W, y2: gy,
+      stroke: 'currentColor', 'stroke-width': 0.5,
+      opacity: lvl === 100 ? 0.35 : 0.15,
+      ...(lvl === 100 ? { 'stroke-dasharray': '2,2' } : {}),
+    }));
+    if (lvl > 0) {
+      const lbl = mksvg('text', {
+        x: 1, y: Number(gy) - 1.5, fill: 'currentColor',
+        'font-size': 5.5, 'font-family': 'SF Mono, Menlo, monospace', opacity: 0.6,
+      });
+      lbl.textContent = `${lvl}%`;
+      svgEl.appendChild(lbl);
+    }
+  }
+
+  // "now" boundary between history and forecast
   svgEl.appendChild(mksvg('line', {
-    x1: tx(now).toFixed(1), y1: 0, x2: tx(now).toFixed(1), y2: H,
-    stroke: 'currentColor', 'stroke-width': 0.5, opacity: 0.15,
+    x1: tx(now).toFixed(1), y1: PAD_T, x2: tx(now).toFixed(1), y2: PAD_T + plotH,
+    stroke: 'currentColor', 'stroke-width': 0.5, opacity: 0.2,
   }));
+
+  // Time labels: start of window, now
+  const mkTimeLabel = (ts, anchor) => {
+    const t = mksvg('text', {
+      x: tx(ts).toFixed(1), y: H - 1.5, 'text-anchor': anchor,
+      fill: 'currentColor', 'font-size': 5.5,
+      'font-family': 'SF Mono, Menlo, monospace', opacity: 0.6,
+    });
+    t.textContent = fmtClock(ts);
+    svgEl.appendChild(t);
+  };
+  mkTimeLabel(tStart, 'start');
+  mkTimeLabel(now, tx(now) > W - 18 ? 'end' : 'middle');
 
   // Reset markers (vertical accent lines at >15pt drops)
   for (let i = 1; i < visible.length; i++) {
     if (visible[i][1] - visible[i - 1][1] < -15) {
       const rx = tx(visible[i][0]).toFixed(1);
       svgEl.appendChild(mksvg('line', {
-        x1: rx, y1: 0, x2: rx, y2: H,
+        x1: rx, y1: PAD_T, x2: rx, y2: PAD_T + plotH,
         stroke: 'var(--accent)', 'stroke-width': 0.5, opacity: 0.35,
       }));
     }
   }
 
-  // Historical path — lift pen (M) at each reset so line doesn't draw through the drop
+  // Historical line + area fill — lift pen (M) at each reset so the line
+  // doesn't draw through the drop
   const cmds = [];
+  const segments = []; // [startIdx, endIdx] per continuous segment, for area fill
+  let segStart = 0;
   for (let i = 0; i < visible.length; i++) {
     const [ts, u] = visible[i];
     const isReset = i > 0 && visible[i][1] - visible[i - 1][1] < -15;
+    if (isReset) { segments.push([segStart, i - 1]); segStart = i; }
     cmds.push(`${i === 0 || isReset ? 'M' : 'L'}${tx(ts).toFixed(1)},${ty(u).toFixed(1)}`);
   }
+  segments.push([segStart, visible.length - 1]);
+
+  const baseY = ty(0).toFixed(1);
+  for (const [s, e] of segments) {
+    if (e <= s) continue;
+    const seg = visible.slice(s, e + 1);
+    const top = seg.map(([ts, u], i) =>
+      `${i === 0 ? 'M' : 'L'}${tx(ts).toFixed(1)},${ty(u).toFixed(1)}`).join(' ');
+    svgEl.appendChild(mksvg('path', {
+      d: `${top} L${tx(seg[seg.length - 1][0]).toFixed(1)},${baseY} L${tx(seg[0][0]).toFixed(1)},${baseY} Z`,
+      fill: 'var(--accent)', opacity: 0.12, stroke: 'none',
+    }));
+  }
+
   svgEl.appendChild(mksvg('path', {
     d: cmds.join(' '),
     stroke: 'var(--accent)', 'stroke-width': 1.5, fill: 'none',
     'stroke-linecap': 'round', 'stroke-linejoin': 'round',
   }));
 
-  // Dashed forecast from last point
-  const rate = computeBurnRate(points, barKey);
-  if (rate && rate > 0.5) {
-    const last = visible[visible.length - 1];
-    const tsLimit = last[0] + (100 - last[1]) / rate * 3600000;
+  // Dot at the current point
+  svgEl.appendChild(mksvg('circle', {
+    cx: tx(last[0]).toFixed(1), cy: ty(last[1]).toFixed(1), r: 1.8,
+    fill: 'var(--accent)',
+  }));
+
+  // Dashed forecast from the current point toward the 100% line
+  if (tsLimit) {
     const tsF = Math.min(tsLimit, tEnd);
-    const x1 = tx(last[0]), y1 = ty(last[1]);
-    const x2 = Math.min(W, tx(tsF));
     const uF = tsF === tsLimit ? 100 : last[1] + rate * (tsF - last[0]) / 3600000;
-    const y2 = Math.max(0, ty(uF));
-    if (x2 > x1) {
-      svgEl.appendChild(mksvg('line', {
-        x1: x1.toFixed(1), y1: y1.toFixed(1),
-        x2: x2.toFixed(1), y2: y2.toFixed(1),
-        stroke: 'var(--accent)', 'stroke-width': 1,
-        'stroke-dasharray': '3,2', opacity: 0.55,
+    svgEl.appendChild(mksvg('line', {
+      x1: tx(last[0]).toFixed(1), y1: ty(last[1]).toFixed(1),
+      x2: tx(tsF).toFixed(1), y2: ty(uF).toFixed(1),
+      stroke: 'var(--accent)', 'stroke-width': 1,
+      'stroke-dasharray': '3,2', opacity: 0.55,
+    }));
+    // Marker where the forecast hits the limit
+    if (tsLimit <= tEnd) {
+      svgEl.appendChild(mksvg('circle', {
+        cx: tx(tsLimit).toFixed(1), cy: ty(100).toFixed(1), r: 1.8,
+        fill: 'none', stroke: 'var(--crit)', 'stroke-width': 0.8,
       }));
     }
   }
@@ -275,7 +348,20 @@ function renderHistScreen() {
   renderSparklineSVG(svgEl, pts, selectedBarKey);
 
   const rate = computeBurnRate(pts, selectedBarKey);
-  statusEl.textContent = (!rate || rate <= 0.5) ? 'no usage' : `${rate.toFixed(1)}%/h`;
+  if (!rate || rate <= 0.5) {
+    statusEl.textContent = 'no usage';
+  } else {
+    const bar = lastData.bars.find(b => b.key === selectedBarKey);
+    const tsLimit = Date.now() + (100 - (bar ? bar.utilization : 0)) / rate * 3600000;
+    const resetsAt = bar && bar.resetsAt ? new Date(bar.resetsAt).getTime() : null;
+    if (resetsAt && resetsAt < tsLimit) {
+      statusEl.textContent = `${rate.toFixed(1)}%/h · resets before limit`;
+    } else if (tsLimit - Date.now() < 24 * 3600000) {
+      statusEl.textContent = `${rate.toFixed(1)}%/h · limit ~${fmtClock(tsLimit)}`;
+    } else {
+      statusEl.textContent = `${rate.toFixed(1)}%/h`;
+    }
+  }
 }
 
 function toggleHistScreen() {
