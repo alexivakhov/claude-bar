@@ -393,10 +393,10 @@ async function createScraper() {
 }
 
 // S6: Validate IPC senders
-// Resize range: width 360–820, height follows content (capped at 640 so the
-// history screen fits at max width without clipping)
-const WIN_MIN_W = 360, WIN_MAX_W = 820;
-const WIN_MIN_H = 160, WIN_MAX_H = 640;
+// Resize range: width 224 (the design's 1:1 scale) to 820, height follows
+// content (capped at 640 so the history screen fits at max width)
+const WIN_MIN_W = 224, WIN_MAX_W = 820;
+const WIN_MIN_H = 100, WIN_MAX_H = 640;
 
 ipcMain.on('window-resize', (event, { w, h }) => {
   if (!floatWin || floatWin.isDestroyed()) return;
@@ -834,7 +834,7 @@ function createFloatWindow() {
   const { width: sw } = screen.getPrimaryDisplay().workAreaSize;
   floatWin = new BrowserWindow({
     width: WIN_MIN_W,
-    height: 240,
+    height: 150,
     x: sw - WIN_MIN_W - 16,
     y: 16,
     frame: false,

@@ -587,7 +587,7 @@ applyScale();
 
     function onMove(e) {
       if (!active) return;
-      const newW = Math.max(360, Math.min(820, ow + e.screenX - ox));
+      const newW = Math.max(224, Math.min(820, ow + e.screenX - ox));
       document.body.style.zoom = newW / BASE_W;
       // B8: compute height from actual content, not fixed aspect ratio
       const zoom = newW / BASE_W;
