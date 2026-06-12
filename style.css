@@ -367,3 +367,56 @@ html[data-theme="light"] .bar {
   padding: 4px 0;
   line-height: 1.6;
 }
+
+.hist-screen {
+  padding: 2px 0;
+}
+
+.hist-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-bottom: 5px;
+  -webkit-app-region: no-drag;
+}
+
+.hist-chip {
+  font-size: 7px;
+  font-family: 'SF Mono', 'Menlo', monospace;
+  color: var(--text-muted);
+  background: var(--bg-track);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  line-height: 1.5;
+  -webkit-app-region: no-drag;
+}
+
+.hist-chip.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.hist-chip:hover:not(.active) {
+  color: var(--text-secondary);
+}
+
+.sparkline {
+  width: 100%;
+  height: 56px;
+  display: block;
+  color: var(--text-ghost);
+  margin-bottom: 3px;
+  -webkit-app-region: no-drag;
+}
+
+.hist-status {
+  font-size: 8px;
+  color: var(--text-muted);
+  text-align: center;
+  letter-spacing: 0.04em;
+  padding-bottom: 2px;
+}

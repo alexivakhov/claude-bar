@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('claudeBar', {
   onConfig:  (cb) => ipcRenderer.on('config-update', (_, cfg) => cb(cfg)),
   // Quiet daily update check found a newer release
   onUpdateAvailable: (cb) => ipcRenderer.on('update-available', (_, info) => cb(info)),
+  onHistoryUpdate: (cb) => ipcRenderer.on('history-update', (_, data) => cb(data)),
   openLogin: () => ipcRenderer.send('open-login'),
   refresh:   () => ipcRenderer.send('manual-refresh'),
   installUpdate: () => ipcRenderer.send('install-update'),

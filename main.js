@@ -39,6 +39,55 @@ function saveSettings() {
   }
 }
 
+// Usage history — [[timestamp_ms, utilization], ...] per bar key, 7-day retention
+let historyData = {};
+let historyPath;
+let historySaveTimeout = null;
+const HISTORY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const HISTORY_SEND_AGE_MS = 48 * 60 * 60 * 1000;
+
+function loadHistory() {
+  try { historyData = JSON.parse(fs.readFileSync(historyPath, 'utf8')); } catch {}
+}
+
+function trimHistory() {
+  const cutoff = Date.now() - HISTORY_MAX_AGE_MS;
+  for (const k of Object.keys(historyData)) {
+    historyData[k] = historyData[k].filter(p => p[0] > cutoff);
+    if (!historyData[k].length) delete historyData[k];
+  }
+}
+
+function saveHistory() {
+  if (historySaveTimeout) return;
+  historySaveTimeout = setTimeout(() => {
+    historySaveTimeout = null;
+    try { fs.writeFileSync(historyPath, JSON.stringify(historyData)); }
+    catch (e) { console.error('saveHistory error:', e.message); }
+  }, 5000);
+}
+
+function recordUsage(data) {
+  if (!Array.isArray(data.bars)) return;
+  const ts = Date.now();
+  for (const bar of data.bars) {
+    if (!historyData[bar.key]) historyData[bar.key] = [];
+    historyData[bar.key].push([ts, bar.utilization]);
+  }
+  trimHistory();
+  saveHistory();
+}
+
+function getHistoryForWidget() {
+  const cutoff = Date.now() - HISTORY_SEND_AGE_MS;
+  const out = {};
+  for (const [k, pts] of Object.entries(historyData)) {
+    const slice = pts.filter(p => p[0] > cutoff);
+    if (slice.length) out[k] = slice;
+  }
+  return out;
+}
+
 // Hide Dock icon at every possible lifecycle point — app.dock.hide() may be
 // ignored if called before the app is fully initialized on some macOS versions.
 if (app.dock) app.dock.hide();
@@ -416,10 +465,12 @@ ipcMain.on('usage:update', async (event, data) => {
     return;
   }
   await saveCookies();
+  recordUsage(data);
   updateTrayTitle(data);
   checkUsageNotifications(data);
   if (floatWin && !floatWin.isDestroyed()) {
     floatWin.webContents.send('usage-update', data);
+    floatWin.webContents.send('history-update', getHistoryForWidget());
   }
 });
 
@@ -484,6 +535,7 @@ function applyPollInterval(min) {
 function sendConfigToWidget() {
   if (floatWin && !floatWin.isDestroyed()) {
     floatWin.webContents.send('config-update', { pollIntervalMin: settings.pollIntervalMin });
+    floatWin.webContents.send('history-update', getHistoryForWidget());
   }
 }
 
@@ -805,7 +857,9 @@ app.whenReady().then(async () => {
   if (app.dock) app.dock.hide();
   cookiePath = path.join(app.getPath('userData'), 'claude-cookies.json');
   settingsPath = path.join(app.getPath('userData'), 'settings.json');
+  historyPath = path.join(app.getPath('userData'), 'usage-history.json');
   loadSettings();
+  loadHistory();
   createTray();
   createFloatWindow();
   floatWin.webContents.once('did-finish-load', sendConfigToWidget);

@@ -96,6 +96,10 @@ let lastData = null;
 let isStale = false;
 // Poll interval (minutes), pushed from main via config-update
 let pollIntervalMin = 2;
+// Usage history: { barKey: [[ts_ms, utilization], ...] }
+let historyData = {};
+let histScreen = false;
+let selectedBarKey = null;
 
 // B8: Request window resize based on actual content height
 function requestFitResize() {
@@ -133,6 +137,154 @@ function updateTimerFromResetsAt() {
       ? `${bar.label} — resets in ${fmtDuration(msLeft2)}`
       : bar.label;
   });
+}
+
+// Linear regression to compute burn rate (%/h) over a sliding window.
+// Segments at resets (>15pt drop) so only the current session's slope is used.
+function computeBurnRate(points, barKey) {
+  const windowMs = barKey === 'five_hour' ? 45 * 60000 : 12 * 3600000;
+  const cutoff = Date.now() - windowMs;
+  let recent = points.filter(([ts]) => ts >= cutoff);
+  for (let i = recent.length - 1; i > 0; i--) {
+    if (recent[i][1] - recent[i - 1][1] < -15) { recent = recent.slice(i); break; }
+  }
+  if (recent.length < 2) return null;
+  const t0 = recent[0][0];
+  const xs = recent.map(([ts]) => (ts - t0) / 3600000);
+  const ys = recent.map(([, u]) => u);
+  const n = xs.length;
+  const sumX = xs.reduce((a, b) => a + b, 0);
+  const sumY = ys.reduce((a, b) => a + b, 0);
+  const sumXY = xs.reduce((s, x, i) => s + x * ys[i], 0);
+  const sumX2 = xs.reduce((s, x) => s + x * x, 0);
+  const denom = n * sumX2 - sumX * sumX;
+  return Math.abs(denom) < 1e-10 ? null : Math.max(0, (n * sumXY - sumX * sumY) / denom);
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+function mksvg(tag, attrs) {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
+  return el;
+}
+
+function renderSparklineSVG(svgEl, points, barKey) {
+  const W = 200, H = 56;
+  svgEl.textContent = '';
+  svgEl.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+  const displayMs = barKey === 'five_hour' ? 6 * 3600000 : 24 * 3600000;
+  const now = Date.now();
+  const tStart = now - displayMs;
+  // Extend 25% into the future for the forecast area
+  const tEnd = now + displayMs * 0.25;
+  const range = tEnd - tStart;
+
+  const tx = (ts) => ((ts - tStart) / range) * W;
+  const ty = (u) => H * 0.05 + (1 - Math.min(1, Math.max(0, u / 100))) * H * 0.90;
+
+  const visible = points.filter(([ts]) => ts >= tStart);
+
+  if (visible.length < 2) {
+    const txt = mksvg('text', {
+      x: W / 2, y: H / 2 + 3, 'text-anchor': 'middle',
+      fill: 'currentColor', 'font-size': 9, 'font-family': 'SF Mono, Menlo, monospace',
+    });
+    txt.textContent = 'no data yet';
+    svgEl.appendChild(txt);
+    return;
+  }
+
+  // Subtle "now" guide line at the boundary between history and forecast
+  svgEl.appendChild(mksvg('line', {
+    x1: tx(now).toFixed(1), y1: 0, x2: tx(now).toFixed(1), y2: H,
+    stroke: 'currentColor', 'stroke-width': 0.5, opacity: 0.15,
+  }));
+
+  // Reset markers (vertical accent lines at >15pt drops)
+  for (let i = 1; i < visible.length; i++) {
+    if (visible[i][1] - visible[i - 1][1] < -15) {
+      const rx = tx(visible[i][0]).toFixed(1);
+      svgEl.appendChild(mksvg('line', {
+        x1: rx, y1: 0, x2: rx, y2: H,
+        stroke: 'var(--accent)', 'stroke-width': 0.5, opacity: 0.35,
+      }));
+    }
+  }
+
+  // Historical path — lift pen (M) at each reset so line doesn't draw through the drop
+  const cmds = [];
+  for (let i = 0; i < visible.length; i++) {
+    const [ts, u] = visible[i];
+    const isReset = i > 0 && visible[i][1] - visible[i - 1][1] < -15;
+    cmds.push(`${i === 0 || isReset ? 'M' : 'L'}${tx(ts).toFixed(1)},${ty(u).toFixed(1)}`);
+  }
+  svgEl.appendChild(mksvg('path', {
+    d: cmds.join(' '),
+    stroke: 'var(--accent)', 'stroke-width': 1.5, fill: 'none',
+    'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+  }));
+
+  // Dashed forecast from last point
+  const rate = computeBurnRate(points, barKey);
+  if (rate && rate > 0.5) {
+    const last = visible[visible.length - 1];
+    const tsLimit = last[0] + (100 - last[1]) / rate * 3600000;
+    const tsF = Math.min(tsLimit, tEnd);
+    const x1 = tx(last[0]), y1 = ty(last[1]);
+    const x2 = Math.min(W, tx(tsF));
+    const uF = tsF === tsLimit ? 100 : last[1] + rate * (tsF - last[0]) / 3600000;
+    const y2 = Math.max(0, ty(uF));
+    if (x2 > x1) {
+      svgEl.appendChild(mksvg('line', {
+        x1: x1.toFixed(1), y1: y1.toFixed(1),
+        x2: x2.toFixed(1), y2: y2.toFixed(1),
+        stroke: 'var(--accent)', 'stroke-width': 1,
+        'stroke-dasharray': '3,2', opacity: 0.55,
+      }));
+    }
+  }
+}
+
+function renderHistScreen() {
+  const chipsEl = document.getElementById('histChips');
+  const svgEl = document.getElementById('sparkline');
+  const statusEl = document.getElementById('histStatus');
+
+  if (!lastData || !lastData.bars || !lastData.bars.length) {
+    chipsEl.textContent = '';
+    svgEl.textContent = '';
+    statusEl.textContent = 'no data';
+    return;
+  }
+
+  const barKeys = lastData.bars.map(b => b.key);
+  if (!selectedBarKey || !barKeys.includes(selectedBarKey)) selectedBarKey = barKeys[0];
+
+  chipsEl.textContent = '';
+  for (const bar of lastData.bars) {
+    const chip = document.createElement('button');
+    chip.className = 'hist-chip' + (bar.key === selectedBarKey ? ' active' : '');
+    chip.textContent = bar.shortLabel;
+    chip.addEventListener('click', () => { selectedBarKey = bar.key; renderHistScreen(); });
+    chipsEl.appendChild(chip);
+  }
+
+  const pts = historyData[selectedBarKey] || [];
+  renderSparklineSVG(svgEl, pts, selectedBarKey);
+
+  const rate = computeBurnRate(pts, selectedBarKey);
+  statusEl.textContent = (!rate || rate <= 0.5) ? 'no usage' : `${rate.toFixed(1)}%/h`;
+}
+
+function toggleHistScreen() {
+  histScreen = !histScreen;
+  document.getElementById('barsScreen').style.display = histScreen ? 'none' : '';
+  document.getElementById('histScreen').style.display = histScreen ? '' : 'none';
+  document.getElementById('histBtn').textContent = histScreen ? '▤' : '∿';
+  if (histScreen) renderHistScreen();
+  requestFitResize();
 }
 
 // S5: Build a bar row with DOM nodes (no innerHTML for dynamic strings)
@@ -210,6 +362,7 @@ function render(data) {
   }
 
   lastData = data;
+  if (histScreen) renderHistScreen();
   loginBtn.textContent = '↗ log out';
   lastTs = data.fetchedAt;
 
@@ -275,9 +428,15 @@ window.claudeBar.onUpdateAvailable((info) => {
 
 document.getElementById('updateBanner').addEventListener('click', () => window.claudeBar.installUpdate());
 
+window.claudeBar.onHistoryUpdate((data) => {
+  historyData = data;
+  if (histScreen) renderHistScreen();
+});
+
 document.getElementById('loginBtn').addEventListener('click', () => window.claudeBar.openLogin());
 document.getElementById('themeBtn').addEventListener('click', cycleTheme);
 document.getElementById('pinBtn').addEventListener('click', togglePin);
+document.getElementById('histBtn').addEventListener('click', toggleHistScreen);
 
 // Feature 4: manual refresh — spin the dot to "loading" until the next update
 document.getElementById('refreshBtn').addEventListener('click', () => {

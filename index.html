@@ -27,13 +27,21 @@
         <span class="plan-label" id="planLabel"></span>
         <span class="reset-times" id="resetTimes"></span>
       </div>
-      <div class="bars" id="bars">
-        <div class="no-data">loading...</div>
+      <div id="barsScreen">
+        <div class="bars" id="bars">
+          <div class="no-data">loading...</div>
+        </div>
+      </div>
+      <div id="histScreen" style="display:none" class="hist-screen">
+        <div class="hist-chips" id="histChips"></div>
+        <svg class="sparkline" id="sparkline" viewBox="0 0 200 56" preserveAspectRatio="none"></svg>
+        <div class="hist-status" id="histStatus"></div>
       </div>
       <div class="update-banner" id="updateBanner" title="Click to install"></div>
       <div class="footer">
         <span class="updated" id="updated">refreshing every 2min</span>
         <button class="theme-btn" id="refreshBtn" title="Refresh now">↻</button>
+        <button class="theme-btn" id="histBtn" title="Usage history">∿</button>
         <button class="theme-btn" id="themeBtn" title="Cycle theme">◑</button>
         <button class="theme-btn" id="pinBtn" title="Toggle always on top">⊤</button>
         <button class="login-btn" id="loginBtn">↗ log in</button>
