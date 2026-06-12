@@ -6,9 +6,16 @@ A transparent floating widget for macOS that tracks your Claude.ai usage limits 
 |------|-------|-------|
 | ![Dark theme](screenshot-dark.png) | ![Mauve theme](screenshot-mauve.png) | ![Light theme](screenshot-light.png) |
 
+**Usage History** — click `∿` to see a sparkline of the last 48 h with burn rate and limit forecast:
+
+| Dark | Mauve | Light |
+|------|-------|-------|
+| ![Dark history](screenshot-dark-history.png) | ![Mauve history](screenshot-mauve-history.png) | ![Light history](screenshot-light-history.png) |
+
 ## Features
 
-- **Usage % in the menubar** — the tray icon shows the most constrained limit right next to it, so you don't even need the widget on screen
+- **Usage history & sparkline** — click `∿` to see a 48 h sparkline per limit (SESSION / WEEKLY / EXTRA_US) with burn rate (`78.7%/h`), a forecast line, and a red marker at the projected limit time
+- **Usage % in the menubar** — the tray icon shows the Session limit percentage right next to it, so you don't even need the widget on screen
 - **Threshold notifications** — system notification when any limit crosses 80% / 95%, and when the session resets (both toggleable in the tray menu)
 - **Always on top** — borderless, semi-transparent widget that stays above all windows; click `⊤` to send it to the background, `⊥` to pin it back — choice persists across restarts
 - **Real-time usage bars** — session, weekly, and per-model limits with color coding
@@ -39,6 +46,7 @@ Download the latest `.dmg` from the [Releases](https://github.com/alexivakhov/cl
 | Button | Action |
 |--------|--------|
 | `↻` | Refresh usage data now |
+| `∿` | Toggle Usage History screen (sparkline + burn rate) |
 | `◑` | Cycle color theme (Dark → Light → Mauve) |
 | `⊤` / `⊥` | Toggle always-on-top. `⊤` = pinned above all windows; `⊥` = normal window (other windows can cover it) |
 | `↗ log in` / `↗ log out` | Open login or log out |
