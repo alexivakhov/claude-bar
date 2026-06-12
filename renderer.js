@@ -565,7 +565,14 @@ const BASE_W = 224;
 function applyScale() {
   document.body.style.zoom = window.innerWidth / BASE_W;
 }
-window.addEventListener('resize', applyScale);
+// Native edge-resize (frameless windows have invisible resize zones) can set
+// an arbitrary window height, clipping the content — snap height back to fit.
+let fitSnapTimer = null;
+window.addEventListener('resize', () => {
+  applyScale();
+  clearTimeout(fitSnapTimer);
+  fitSnapTimer = setTimeout(requestFitResize, 150);
+});
 applyScale();
 
 (function () {
