@@ -93,7 +93,28 @@ function getHistoryForWidget() {
 if (app.dock) app.dock.hide();
 app.on('will-finish-launching', () => { if (app.dock) app.dock.hide(); });
 
-const AUTH_PATTERNS = ['/login', '/auth', 'accounts.google'];
+// Auth pages: claude.ai/login|auth or Google accounts. Parsed by hostname +
+// pathname so substrings in query params (or look-alike hosts) can't match.
+function isAuthUrl(urlStr) {
+  try {
+    const u = new URL(urlStr);
+    if (u.hostname === 'accounts.google.com') return true;
+    return u.hostname === 'claude.ai' &&
+      (u.pathname.startsWith('/login') || u.pathname.startsWith('/auth'));
+  } catch {
+    return false;
+  }
+}
+
+// Exact-host check — startsWith('https://claude.ai') would also match
+// https://claude.ai.evil.com and mark a hostile page as authenticated.
+function isClaudeUrl(urlStr) {
+  try {
+    return new URL(urlStr).hostname === 'claude.ai';
+  } catch {
+    return false;
+  }
+}
 
 // In-memory (no 'persist:' prefix) = no LevelDB files, no lock conflicts between restarts.
 // Cookies are persisted manually via claude-cookies.json (encrypted with safeStorage).
@@ -258,8 +279,10 @@ async function createScraper() {
 
   // OAuth popups (Google/Apple login): must share the same partition so
   // auth cookies land in scraper-temp, not in a separate default session.
-  // S4: Only allow popups from trusted OAuth hosts.
-  scraperWin.webContents.setWindowOpenHandler(({ url, frameName, disposition }) => {
+  // S4: Only allow popups from trusted OAuth hosts. Applied to the scraper
+  // window AND to every popup it spawns — without it, pages inside a popup
+  // could open unfiltered windows.
+  const oauthPopupHandler = ({ url, frameName, disposition }) => {
     console.log(`popup request: url=${url || '(empty)'} frame=${frameName} disposition=${disposition}`);
     if (!isAllowedPopupHost(url)) {
       console.warn('setWindowOpenHandler: denied popup for', url);
@@ -277,11 +300,13 @@ async function createScraper() {
         }
       }
     };
-  });
+  };
+  scraperWin.webContents.setWindowOpenHandler(oauthPopupHandler);
 
   scraperWin.webContents.on('did-create-window', (popup, details) => {
     console.log('popup created:', details && details.url);
     popup.webContents.setUserAgent(CHROME_UA);
+    popup.webContents.setWindowOpenHandler(oauthPopupHandler);
     popup.webContents.on('did-navigate', (_, u) => console.log('popup navigate:', u));
     popup.once('closed', async () => {
       console.log('popup closed, preventAutoLogin =', preventAutoLogin);
@@ -293,7 +318,7 @@ async function createScraper() {
       await new Promise(r => setTimeout(r, 8000));
       if (!scraperWin || scraperWin.isDestroyed()) return;
       const cur = scraperWin.webContents.getURL();
-      if (AUTH_PATTERNS.some(p => cur.includes(p))) {
+      if (isAuthUrl(cur)) {
         console.log('still on auth page after popup close — reloading /new');
         scraperWin.loadURL('https://claude.ai/new');
       }
@@ -304,7 +329,7 @@ async function createScraper() {
     if (!isMainFrame) return;
     console.log('spa:', url);
 
-    if (AUTH_PATTERNS.some(p => url.includes(p))) {
+    if (isAuthUrl(url)) {
       wasOnAuthPage = true;
       if (isLoggedIn) {
         isLoggedIn = false;
@@ -341,7 +366,7 @@ async function createScraper() {
       failLoadRetryTimeout = null;
     }
 
-    if (AUTH_PATTERNS.some(p => url.includes(p))) {
+    if (isAuthUrl(url)) {
       wasOnAuthPage = true;
       if (isLoggedIn) {
         isLoggedIn = false;
@@ -353,7 +378,7 @@ async function createScraper() {
     }
 
     // B6: Only treat as authenticated if we're actually on claude.ai (not error/cloudflare pages)
-    if (!url.startsWith('https://claude.ai')) {
+    if (!isClaudeUrl(url)) {
       console.log('did-finish-load: non-claude.ai URL, ignoring:', url);
       return;
     }
