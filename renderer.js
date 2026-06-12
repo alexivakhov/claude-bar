@@ -310,12 +310,29 @@ function renderSparklineSVG(svgEl, points, barKey) {
       stroke: 'var(--accent)', 'stroke-width': 1,
       'stroke-dasharray': '3,2', opacity: 0.55,
     }));
-    // Marker where the forecast hits the limit
+    // Where the forecast hits the limit: vertical dashed line + marker + time label
     if (tsLimit <= tEnd) {
+      const lx = tx(tsLimit);
+      svgEl.appendChild(mksvg('line', {
+        x1: lx.toFixed(1), y1: PAD_T, x2: lx.toFixed(1), y2: PAD_T + plotH,
+        stroke: 'var(--crit)', 'stroke-width': 0.7,
+        'stroke-dasharray': '2,2', opacity: 0.6,
+      }));
       svgEl.appendChild(mksvg('circle', {
-        cx: tx(tsLimit).toFixed(1), cy: ty(100).toFixed(1), r: 1.8,
+        cx: lx.toFixed(1), cy: ty(100).toFixed(1), r: 1.8,
         fill: 'none', stroke: 'var(--crit)', 'stroke-width': 0.8,
       }));
+      // Skip the label if it would collide with the "now" label
+      if (lx - tx(now) > 24) {
+        const lbl = mksvg('text', {
+          x: lx.toFixed(1), y: H - 1.5,
+          'text-anchor': lx > W - 14 ? 'end' : 'middle',
+          fill: 'var(--crit)', 'font-size': 5.5,
+          'font-family': 'SF Mono, Menlo, monospace', opacity: 0.85,
+        });
+        lbl.textContent = fmtClock(tsLimit);
+        svgEl.appendChild(lbl);
+      }
     }
   }
 }
