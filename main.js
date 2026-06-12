@@ -401,8 +401,8 @@ ipcMain.on('window-resize', (event, { w, h }) => {
   }
   floatWin.setSize(
     Math.round(Math.max(180, Math.min(500, w))),
-    // B8: clamp consistent with maxHeight 340
-    Math.round(Math.max(100, Math.min(340, h)))
+    // B8: clamp consistent with maxHeight 560 (history screen is taller than bars)
+    Math.round(Math.max(100, Math.min(560, h)))
   );
 });
 
@@ -459,11 +459,16 @@ function checkUsageNotifications(data) {
   }
 }
 
+// Last usage payload — replayed to the widget on did-finish-load, because the
+// scraper's first poll often completes before the widget registers listeners.
+let lastUsageData = null;
+
 ipcMain.on('usage:update', async (event, data) => {
   if (!scraperWin || scraperWin.isDestroyed() || event.sender !== scraperWin.webContents) {
     console.warn('usage:update: ignored from unexpected sender');
     return;
   }
+  lastUsageData = data;
   await saveCookies();
   recordUsage(data);
   updateTrayTitle(data);
@@ -536,6 +541,7 @@ function sendConfigToWidget() {
   if (floatWin && !floatWin.isDestroyed()) {
     floatWin.webContents.send('config-update', { pollIntervalMin: settings.pollIntervalMin });
     floatWin.webContents.send('history-update', getHistoryForWidget());
+    if (lastUsageData) floatWin.webContents.send('usage-update', lastUsageData);
   }
 }
 
@@ -835,7 +841,7 @@ function createFloatWindow() {
     minWidth: 180,
     minHeight: 120,
     maxWidth: 500,
-    maxHeight: 340,
+    maxHeight: 560,
     hasShadow: true,
     webPreferences: {
       nodeIntegration: false,
