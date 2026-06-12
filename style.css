@@ -328,14 +328,15 @@ html[data-theme="light"] .bar {
 }
 
 .theme-btn {
-  font-size: 9px;
-  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-secondary);
   background: none;
   border: none;
   cursor: pointer;
   font-family: 'SF Mono', 'Menlo', monospace;
-  padding: 0 2px;
-  opacity: 0.55;
+  padding: 0 3px;
+  opacity: 0.8;
   transition: opacity .15s;
   -webkit-app-region: no-drag;
 }

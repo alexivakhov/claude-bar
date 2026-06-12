@@ -416,15 +416,15 @@ ipcMain.on('pin-toggle', (event, pinned) => {
 });
 
 // Feature 1: utilization % in the menubar next to the tray icon.
-// Shows the most constrained (highest) bar — that's the limit you'll hit first.
+// Shows the Session (five_hour) bar — the limit that matters right now.
 function updateTrayTitle(data) {
   if (!tray) return;
   if (!data || !Array.isArray(data.bars) || data.bars.length === 0) {
     tray.setTitle('');
     return;
   }
-  const max = Math.max(...data.bars.map(b => b.utilization));
-  tray.setTitle(` ${Math.round(max)}%`, { fontType: 'monospacedDigit' });
+  const sessionBar = data.bars.find(b => b.key === 'five_hour') || data.bars[0];
+  tray.setTitle(` ${Math.round(sessionBar.utilization)}%`, { fontType: 'monospacedDigit' });
 }
 
 // Feature 2: system notifications on threshold crossings and session reset.

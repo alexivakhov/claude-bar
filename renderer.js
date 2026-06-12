@@ -54,12 +54,12 @@ function fmt(mins) {
 function timeAgo(ts) {
   if (!ts) return '—';
   const s = Math.round((Date.now() - ts) / 1000);
-  if (s < 60) return `last updated ${s}s ago`;
+  if (s < 60) return `updated ${s}s ago`;
   const totalMin = Math.round(s / 60);
-  if (totalMin < 60) return `last updated ${totalMin}min ago`;
+  if (totalMin < 60) return `updated ${totalMin}min ago`;
   const h = Math.floor(totalMin / 60);
   const m = totalMin % 60;
-  return m > 0 ? `last updated ${h}h ${m}min ago` : `last updated ${h}h ago`;
+  return m > 0 ? `updated ${h}h ${m}min ago` : `updated ${h}h ago`;
 }
 
 const RESET_LABEL_MAP = {
@@ -512,7 +512,7 @@ window.claudeBar.onError((err) => {
   const updated = document.getElementById('updated');
   // Set dot to idle/grey
   dot.className = 'dot';
-  const base = lastTs ? timeAgo(lastTs) : 'last updated —';
+  const base = lastTs ? timeAgo(lastTs) : 'updated —';
   updated.textContent = base + ' · offline';
 });
 
