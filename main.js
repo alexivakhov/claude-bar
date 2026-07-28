@@ -492,39 +492,18 @@ ipcMain.on('pin-toggle', (event, pinned) => {
 });
 
 // Feature 1: utilization % in the menubar next to the tray icon.
-// Shows whichever bucket is closest to its cap — usually Session, but a
-// weekly bar (or the usage-credits spend cap) can overtake it near its own
-// reset. A one-letter prefix says which one so the % doesn't get read as
-// Session when it isn't.
-function trayPrefixForBarKey(key) {
-  if (key === 'five_hour') return 'S';
-  if (key === 'seven_day') return 'W';
-  return key.replace(/^seven_day_/, '').charAt(0).toUpperCase();
-}
-
-function pickHottestForTray(data) {
-  const candidates = [];
-  if (Array.isArray(data.bars)) {
-    for (const bar of data.bars) {
-      candidates.push({ prefix: trayPrefixForBarKey(bar.key), pct: bar.utilization });
-    }
-  }
-  if (data.credits && data.credits.enabled && typeof data.credits.percent === 'number') {
-    candidates.push({ prefix: '$', pct: data.credits.percent });
-  }
-  if (!candidates.length) return null;
-  candidates.sort((a, b) => b.pct - a.pct);
-  return candidates[0];
-}
-
+// Shows the Session (five_hour) bar only — showing whichever bucket was
+// closest to its cap (weekly, credits) made the number ambiguous, since
+// there was nothing next to it clarifying which bucket it referred to
+// beyond a one-letter prefix that was easy to miss at a glance.
 function updateTrayTitle(data) {
   if (!tray) return;
-  const hottest = data ? pickHottestForTray(data) : null;
-  if (!hottest) {
+  if (!data || !Array.isArray(data.bars) || data.bars.length === 0) {
     tray.setTitle('');
     return;
   }
-  tray.setTitle(` ${hottest.prefix} ${Math.round(hottest.pct)}%`, { fontType: 'monospacedDigit' });
+  const sessionBar = data.bars.find(b => b.key === 'five_hour') || data.bars[0];
+  tray.setTitle(` ${Math.round(sessionBar.utilization)}%`, { fontType: 'monospacedDigit' });
 }
 
 // Feature 2: system notifications on threshold crossings and session reset.
