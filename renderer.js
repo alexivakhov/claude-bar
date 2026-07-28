@@ -161,6 +161,17 @@ function computeBurnRate(points, barKey) {
   return Math.abs(denom) < 1e-10 ? null : Math.max(0, (n * sumXY - sumX * sumY) / denom);
 }
 
+// The %/h rate that's worth reporting rather than dismissed as noise. Scaled
+// to the bar's own reset cycle (5h for Session, ~7d for weekly bars) — the
+// same real activity level naturally produces a ~33x smaller %/h number
+// over a week than over 5 hours, so a single fixed cutoff (tuned for
+// Session) was reading genuine, steadily-climbing weekly usage as "no
+// usage" whenever it landed under ~0.5%/h, which is most of the time.
+function minMeaningfulRate(barKey) {
+  const periodHours = barKey === 'five_hour' ? 5 : 7 * 24;
+  return 100 / (periodHours * 40);
+}
+
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 function mksvg(tag, attrs) {
@@ -365,18 +376,35 @@ function renderHistScreen() {
   renderSparklineSVG(svgEl, pts, selectedBarKey);
 
   const rate = computeBurnRate(pts, selectedBarKey);
-  if (!rate || rate <= 0.5) {
+  if (!rate || rate <= minMeaningfulRate(selectedBarKey)) {
     statusEl.textContent = 'no usage';
   } else {
     const bar = lastData.bars.find(b => b.key === selectedBarKey);
     const tsLimit = Date.now() + (100 - (bar ? bar.utilization : 0)) / rate * 3600000;
     const resetsAt = bar && bar.resetsAt ? new Date(bar.resetsAt).getTime() : null;
+
+    // Pace multiplier: how the current burn rate compares to the rate that
+    // would land exactly on 100% at reset. Only meaningful for the weekly
+    // bars — Session already shows its own countdown in the main timer, and
+    // its short window makes a rate ratio noisy rather than useful.
+    let paceSuffix = '';
+    if (selectedBarKey !== 'five_hour' && resetsAt) {
+      const hoursLeft = (resetsAt - Date.now()) / 3600000;
+      if (hoursLeft > 0.1) {
+        const neededRate = (100 - (bar ? bar.utilization : 0)) / hoursLeft;
+        if (neededRate > 0.1) {
+          const pace = rate / neededRate;
+          paceSuffix = ` · ${pace.toFixed(1)}× pace`;
+        }
+      }
+    }
+
     if (resetsAt && resetsAt < tsLimit) {
-      statusEl.textContent = `${rate.toFixed(1)}%/h · resets before limit`;
+      statusEl.textContent = `${rate.toFixed(1)}%/h · resets before limit${paceSuffix}`;
     } else if (tsLimit - Date.now() < 24 * 3600000) {
-      statusEl.textContent = `${rate.toFixed(1)}%/h · limit ~${fmtClock(tsLimit)}`;
+      statusEl.textContent = `${rate.toFixed(1)}%/h · limit ~${fmtClock(tsLimit)}${paceSuffix}`;
     } else {
-      statusEl.textContent = `${rate.toFixed(1)}%/h`;
+      statusEl.textContent = `${rate.toFixed(1)}%/h${paceSuffix}`;
     }
   }
 }
@@ -388,6 +416,84 @@ function toggleHistScreen() {
   document.getElementById('histBtn').textContent = histScreen ? '▤' : '∿';
   if (histScreen) renderHistScreen();
   requestFitResize();
+}
+
+function formatMoney(minor, currency, exponent) {
+  if (typeof minor !== 'number') return null;
+  const value = minor / Math.pow(10, exponent ?? 2);
+  try {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: currency || 'USD' }).format(value);
+  } catch {
+    return `${value.toFixed(exponent ?? 2)} ${currency || 'USD'}`;
+  }
+}
+
+// Usage credits, styled like a bar row. The headline number is the actual
+// prepaid balance (what you really have to spend, refreshed every poll) —
+// that's the number people actually want to watch trend down, not "$0.00
+// spent" against a monthly cap that most of the time isn't the binding
+// constraint. The monthly-spend/limit relationship still drives the bar
+// fill (it's the real 0–100% progress value) and moves to the tooltip.
+function renderCredits(credits) {
+  const row = document.getElementById('creditsRow');
+  row.textContent = '';
+  if (!credits || !credits.enabled) {
+    row.style.display = 'none';
+    return;
+  }
+  row.style.display = '';
+
+  const pct = typeof credits.percent === 'number' ? credits.percent : 0;
+  const usedStr = formatMoney(credits.usedMinor, credits.currency, credits.exponent);
+  const limitStr = formatMoney(credits.limitMinor, credits.currency, credits.exponent);
+  const balanceStr = formatMoney(credits.balanceMinor, credits.balanceCurrency || credits.currency, 2);
+
+  const titleParts = [];
+  if (usedStr && limitStr) titleParts.push(`${usedStr} of ${limitStr} monthly spend`);
+  if (credits.spendLimitReached) titleParts.push('limit reached');
+  if (credits.autoReloadEnabled) titleParts.push('auto-reload on');
+  if (credits.nextExpiresAt) {
+    const daysLeft = Math.ceil((new Date(credits.nextExpiresAt).getTime() - Date.now()) / 86400000);
+    if (daysLeft > 0 && daysLeft <= 60) titleParts.push(`credit expires in ${daysLeft}d`);
+  }
+  row.title = titleParts.length ? titleParts.join(' · ') : 'Usage credits';
+
+  const nameSpan = document.createElement('span');
+  nameSpan.className = 'bar-name';
+  nameSpan.textContent = 'CREDITS';
+
+  const track = document.createElement('div');
+  track.className = 'track';
+  const fill = document.createElement('div');
+  const cls = credits.spendLimitReached ? 'crit' : barColor(pct);
+  fill.className = 'fill' + (cls ? ' ' + cls : '');
+  fill.style.width = Math.min(100, pct) + '%';
+  track.appendChild(fill);
+
+  const pctSpan = document.createElement('span');
+  pctSpan.className = 'pct credits-pct';
+  pctSpan.textContent = balanceStr
+    || (usedStr && limitStr ? `${usedStr} / ${limitStr}` : `${Math.round(pct)}%`);
+
+  row.appendChild(nameSpan);
+  row.appendChild(track);
+  row.appendChild(pctSpan);
+}
+
+// Two weekly buckets confirmed to be alternative pools for the same work
+// (Sonnet vs Opus, Max-only — both null on Pro/Free so this naturally does
+// nothing there). See preload-scraper.js MODEL_BUCKET_KEYS for why this
+// isn't extended to a guessed frontier/Fable key.
+const MODEL_BUCKET_KEYS = ['seven_day_sonnet', 'seven_day_opus'];
+
+function modelBucketAdvisory(bars) {
+  const present = bars.filter(b => MODEL_BUCKET_KEYS.includes(b.key));
+  if (present.length < 2) return '';
+  const sorted = [...present].sort((a, b) => a.utilization - b.utilization);
+  const best = sorted[0];
+  const worst = sorted[sorted.length - 1];
+  if (worst.utilization - best.utilization < 15) return ''; // not meaningfully different
+  return `${best.shortLabel} ${Math.round(best.utilization)}% has headroom · ${worst.shortLabel} ${Math.round(worst.utilization)}%`;
 }
 
 // S5: Build a bar row with DOM nodes (no innerHTML for dynamic strings)
@@ -447,6 +553,9 @@ function render(data) {
     if (planLabel) planLabel.textContent = data?.planName || '';
     if (resetTimesEl) resetTimesEl.textContent = '';
 
+    renderCredits(data?.credits);
+    document.getElementById('advisory').textContent = '';
+
     if (data?.noUsagePage) {
       lastTs = data.fetchedAt;
       dot.className = 'dot';
@@ -499,6 +608,9 @@ function render(data) {
   for (const bar of data.bars) {
     barsEl.appendChild(buildBarRow(bar));
   }
+
+  renderCredits(data.credits);
+  document.getElementById('advisory').textContent = modelBucketAdvisory(data.bars);
 
   requestFitResize();
 }

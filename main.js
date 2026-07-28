@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen, ipcMain, session, Tray, Menu, nativeImage, dialog, safeStorage, Notification } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, session, Tray, Menu, nativeImage, dialog, safeStorage, Notification, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
@@ -23,6 +23,9 @@ const settings = {
   pollIntervalMin: 2,
   notifyThresholds: true,
   notifySessionReset: true,
+  // Usage-field keys we've already fired the one-time "new field detected"
+  // notification for, so it doesn't repeat every poll (see checkUnknownKeys).
+  notifiedUnknownKeys: [],
 };
 
 function loadSettings() {
@@ -46,32 +49,67 @@ let historySaveTimeout = null;
 const HISTORY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const HISTORY_SEND_AGE_MS = 48 * 60 * 60 * 1000;
 
+// A file that parses as JSON but holds the wrong shape used to throw deep
+// inside trimHistory() — i.e. inside the usage:update handler, before the
+// widget send — silently killing every future update. Validate on load and
+// drop only the malformed keys.
 function loadHistory() {
-  try { historyData = JSON.parse(fs.readFileSync(historyPath, 'utf8')); } catch {}
+  let parsed;
+  try { parsed = JSON.parse(fs.readFileSync(historyPath, 'utf8')); } catch { return; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+  const clean = {};
+  for (const [k, pts] of Object.entries(parsed)) {
+    if (!Array.isArray(pts)) {
+      console.warn(`loadHistory: dropping "${k}" — not an array`);
+      continue;
+    }
+    const valid = pts.filter(p =>
+      Array.isArray(p) && typeof p[0] === 'number' && typeof p[1] === 'number');
+    if (valid.length !== pts.length) {
+      console.warn(`loadHistory: "${k}" — dropped ${pts.length - valid.length} malformed point(s)`);
+    }
+    if (valid.length) clean[k] = valid;
+  }
+  historyData = clean;
 }
 
 function trimHistory() {
   const cutoff = Date.now() - HISTORY_MAX_AGE_MS;
   for (const k of Object.keys(historyData)) {
+    if (!Array.isArray(historyData[k])) { delete historyData[k]; continue; }
     historyData[k] = historyData[k].filter(p => p[0] > cutoff);
     if (!historyData[k].length) delete historyData[k];
   }
+}
+
+function writeHistoryNow() {
+  try { fs.writeFileSync(historyPath, JSON.stringify(historyData)); }
+  catch (e) { console.error('saveHistory error:', e.message); }
 }
 
 function saveHistory() {
   if (historySaveTimeout) return;
   historySaveTimeout = setTimeout(() => {
     historySaveTimeout = null;
-    try { fs.writeFileSync(historyPath, JSON.stringify(historyData)); }
-    catch (e) { console.error('saveHistory error:', e.message); }
+    writeHistoryNow();
   }, 5000);
+}
+
+// Quit cancels the 5s debounce, so the newest points would be lost — write
+// them out synchronously before the app exits.
+function flushHistory() {
+  if (!historySaveTimeout) return;
+  clearTimeout(historySaveTimeout);
+  historySaveTimeout = null;
+  writeHistoryNow();
 }
 
 function recordUsage(data) {
   if (!Array.isArray(data.bars)) return;
   const ts = Date.now();
   for (const bar of data.bars) {
-    if (!historyData[bar.key]) historyData[bar.key] = [];
+    if (typeof bar.utilization !== 'number' || !Number.isFinite(bar.utilization)) continue;
+    if (!Array.isArray(historyData[bar.key])) historyData[bar.key] = [];
     historyData[bar.key].push([ts, bar.utilization]);
   }
   trimHistory();
@@ -175,6 +213,10 @@ async function restoreCookies() {
 
     const cookies = JSON.parse(jsonStr);
     if (!Array.isArray(cookies) || cookies.length === 0) return false;
+    // Each cookie is set independently: Chromium rejects some individually
+    // (e.g. a __Host- prefixed cookie carrying a `domain`), and one rejection
+    // must not abandon the rest of an otherwise valid session.
+    let restored = 0;
     for (const c of cookies) {
       const entry = {
         url: 'https://claude.ai',
@@ -184,15 +226,20 @@ async function restoreCookies() {
         secure: c.secure,
         httpOnly: c.httpOnly,
       };
-      if (c.domain) entry.domain = c.domain;
+      if (c.domain && !c.name.startsWith('__Host-')) entry.domain = c.domain;
       if (c.expirationDate) entry.expirationDate = c.expirationDate;
       if (['unspecified', 'no_restriction', 'lax', 'strict'].includes(c.sameSite)) {
         entry.sameSite = c.sameSite;
       }
-      await scraperSession().cookies.set(entry);
+      try {
+        await scraperSession().cookies.set(entry);
+        restored++;
+      } catch (e) {
+        console.warn(`restoreCookies: skipped "${c.name}" — ${e.message}`);
+      }
     }
-    console.log(`cookies restored: ${cookies.length}`);
-    return true;
+    console.log(`cookies restored: ${restored}/${cookies.length}`);
+    return restored > 0;
   } catch (e) {
     console.error('restoreCookies error:', e.message);
     return false;
@@ -445,15 +492,39 @@ ipcMain.on('pin-toggle', (event, pinned) => {
 });
 
 // Feature 1: utilization % in the menubar next to the tray icon.
-// Shows the Session (five_hour) bar — the limit that matters right now.
+// Shows whichever bucket is closest to its cap — usually Session, but a
+// weekly bar (or the usage-credits spend cap) can overtake it near its own
+// reset. A one-letter prefix says which one so the % doesn't get read as
+// Session when it isn't.
+function trayPrefixForBarKey(key) {
+  if (key === 'five_hour') return 'S';
+  if (key === 'seven_day') return 'W';
+  return key.replace(/^seven_day_/, '').charAt(0).toUpperCase();
+}
+
+function pickHottestForTray(data) {
+  const candidates = [];
+  if (Array.isArray(data.bars)) {
+    for (const bar of data.bars) {
+      candidates.push({ prefix: trayPrefixForBarKey(bar.key), pct: bar.utilization });
+    }
+  }
+  if (data.credits && data.credits.enabled && typeof data.credits.percent === 'number') {
+    candidates.push({ prefix: '$', pct: data.credits.percent });
+  }
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => b.pct - a.pct);
+  return candidates[0];
+}
+
 function updateTrayTitle(data) {
   if (!tray) return;
-  if (!data || !Array.isArray(data.bars) || data.bars.length === 0) {
+  const hottest = data ? pickHottestForTray(data) : null;
+  if (!hottest) {
     tray.setTitle('');
     return;
   }
-  const sessionBar = data.bars.find(b => b.key === 'five_hour') || data.bars[0];
-  tray.setTitle(` ${Math.round(sessionBar.utilization)}%`, { fontType: 'monospacedDigit' });
+  tray.setTitle(` ${hottest.prefix} ${Math.round(hottest.pct)}%`, { fontType: 'monospacedDigit' });
 }
 
 // Feature 2: system notifications on threshold crossings and session reset.
@@ -486,22 +557,76 @@ function checkUsageNotifications(data) {
     }
     prevUtilization[bar.key] = bar.utilization;
   }
+
+  // Usage credits (spend cap) — same threshold policy as the % bars, plus a
+  // one-off when the account-level spend limit is actually hit (a distinct
+  // condition from crossing 95%, since the cap can be raised/lowered
+  // independent of the running total).
+  if (data.credits && data.credits.enabled && Notification.isSupported()) {
+    const pct = data.credits.percent;
+    const prevPct = prevUtilization.__credits;
+    if (typeof pct === 'number' && prevPct !== undefined && settings.notifyThresholds) {
+      for (const t of NOTIFY_THRESHOLDS) {
+        if (prevPct < t && pct >= t) {
+          new Notification({
+            title: 'Claude Bar — Usage Credits',
+            body: `Spend reached ${Math.round(pct)}% of your monthly cap (threshold ${t}%)`,
+          }).show();
+          break;
+        }
+      }
+    }
+    if (typeof pct === 'number') prevUtilization.__credits = pct;
+
+    const wasReached = prevUtilization.__spendLimitReached;
+    if (data.credits.spendLimitReached && !wasReached) {
+      new Notification({
+        title: 'Claude Bar — Usage Credits',
+        body: 'Spend limit reached — extra usage is paused until it resets or you raise the cap.',
+      }).show();
+    }
+    prevUtilization.__spendLimitReached = data.credits.spendLimitReached;
+  }
+}
+
+// New, previously-unseen top-level usage fields (see collectUnknownKeys in
+// preload-scraper.js) get a one-time notification instead of vanishing
+// silently — persisted so it doesn't repeat on every poll.
+function checkUnknownKeys(data) {
+  if (!Array.isArray(data.unknownKeys) || data.unknownKeys.length === 0) return;
+  const newOnes = data.unknownKeys.filter(k => !settings.notifiedUnknownKeys.includes(k));
+  if (newOnes.length === 0) return;
+  settings.notifiedUnknownKeys.push(...newOnes);
+  saveSettings();
+  if (Notification.isSupported()) {
+    new Notification({
+      title: 'Claude Bar',
+      body: `New usage field(s) from the API: ${newOnes.join(', ')} — check tray → Copy Raw Usage JSON`,
+    }).show();
+  }
 }
 
 // Last usage payload — replayed to the widget on did-finish-load, because the
 // scraper's first poll often completes before the widget registers listeners.
 let lastUsageData = null;
+// Unnormalized org + usage JSON from the last poll, for the "Copy Raw Usage
+// JSON" debug menu item — lets us see real key/capability names the API
+// adds (new weekly buckets, plan capabilities) without a code change first.
+let lastRawUsageData = null;
 
 ipcMain.on('usage:update', async (event, data) => {
   if (!scraperWin || scraperWin.isDestroyed() || event.sender !== scraperWin.webContents) {
     console.warn('usage:update: ignored from unexpected sender');
     return;
   }
+  lastRawUsageData = data.raw || null;
+  delete data.raw;
   lastUsageData = data;
   await saveCookies();
   recordUsage(data);
   updateTrayTitle(data);
   checkUsageNotifications(data);
+  checkUnknownKeys(data);
   if (floatWin && !floatWin.isDestroyed()) {
     floatWin.webContents.send('usage-update', data);
     floatWin.webContents.send('history-update', getHistoryForWidget());
@@ -580,21 +705,34 @@ ipcMain.on('install-update', (event) => {
   checkForUpdates();
 });
 
+// GitHub answers asset downloads with 302 today, but 303/307/308 are all
+// valid for the same hop and used to surface as a bare "HTTP 307".
+const REDIRECT_CODES = new Set([301, 302, 303, 307, 308]);
+
+// Location may legitimately be relative — resolve it against the URL we asked
+// for, since https.get() only accepts an absolute URL.
+function resolveRedirect(location, base) {
+  try { return new URL(location, base).toString(); } catch { return null; }
+}
+
 // B3: fetchJSON with redirect limit, status check, and error body
 function fetchJSON(url, redirectCount = 0) {
   const MAX_REDIRECTS = 5;
   return new Promise((resolve, reject) => {
     https.get(url, { headers: { 'User-Agent': 'claude-bar-updater', 'Accept': 'application/vnd.github.v3+json' } }, (res) => {
-      if (res.statusCode === 301 || res.statusCode === 302) {
+      if (REDIRECT_CODES.has(res.statusCode)) {
+        res.resume();
         if (redirectCount >= MAX_REDIRECTS) {
-          res.resume();
           return reject(new Error(`Too many redirects (${MAX_REDIRECTS}) fetching ${url}`));
         }
         if (!res.headers.location) {
-          res.resume();
           return reject(new Error(`Redirect with no Location header from ${url}`));
         }
-        return fetchJSON(res.headers.location, redirectCount + 1).then(resolve).catch(reject);
+        const next = resolveRedirect(res.headers.location, url);
+        if (!next) {
+          return reject(new Error(`Invalid redirect target "${res.headers.location}" from ${url}`));
+        }
+        return fetchJSON(next, redirectCount + 1).then(resolve).catch(reject);
       }
       let data = '';
       res.on('data', chunk => (data += chunk));
@@ -617,16 +755,19 @@ function downloadFile(url, destPath, redirectCount = 0) {
   return new Promise((resolve, reject) => {
     function get(u, depth) {
       https.get(u, { headers: { 'User-Agent': 'claude-bar-updater' } }, (res) => {
-        if (res.statusCode === 301 || res.statusCode === 302) {
+        if (REDIRECT_CODES.has(res.statusCode)) {
+          res.resume();
           if (depth >= MAX_REDIRECTS) {
-            res.resume();
             return reject(new Error(`Too many redirects downloading ${u}`));
           }
           if (!res.headers.location) {
-            res.resume();
             return reject(new Error(`Redirect with no Location header from ${u}`));
           }
-          return get(res.headers.location, depth + 1);
+          const next = resolveRedirect(res.headers.location, u);
+          if (!next) {
+            return reject(new Error(`Invalid redirect target "${res.headers.location}" from ${u}`));
+          }
+          return get(next, depth + 1);
         }
         if (res.statusCode < 200 || res.statusCode >= 300) {
           res.resume();
@@ -643,14 +784,28 @@ function downloadFile(url, destPath, redirectCount = 0) {
   });
 }
 
+// Splits off pre-release/build suffixes before the numeric compare —
+// Number('0-beta') is NaN, which used to make 2.1.0-beta read as 2.1.0 → 0
+// and rank below 2.0.9.
+function parseVersion(v) {
+  const core = String(v).replace(/^v/, '').split('+')[0];
+  const dash = core.indexOf('-');
+  const nums = (dash === -1 ? core : core.slice(0, dash))
+    .split('.')
+    .map(n => parseInt(n, 10) || 0);
+  return { nums, pre: dash === -1 ? null : core.slice(dash + 1) };
+}
+
 function semverGt(a, b) {
-  const pa = a.replace(/^v/, '').split('.').map(Number);
-  const pb = b.replace(/^v/, '').split('.').map(Number);
+  const pa = parseVersion(a);
+  const pb = parseVersion(b);
   for (let i = 0; i < 3; i++) {
-    if ((pa[i] || 0) > (pb[i] || 0)) return true;
-    if ((pa[i] || 0) < (pb[i] || 0)) return false;
+    if ((pa.nums[i] || 0) > (pb.nums[i] || 0)) return true;
+    if ((pa.nums[i] || 0) < (pb.nums[i] || 0)) return false;
   }
-  return false;
+  // Equal core versions: a final release outranks a pre-release of the same
+  // version, so 2.0.0 offers an update to someone running 2.0.0-beta.
+  return !pa.pre && !!pb.pre;
 }
 
 // S2: Sanitize asset names
@@ -786,6 +941,22 @@ async function quietUpdateCheck() {
   }
 }
 
+// Debug: copies the last poll's unnormalized org + usage JSON to the
+// clipboard, so a new API field (bucket key, capability) can be inspected
+// without attaching a debugger to the hidden scraper window.
+function copyRawUsageJson() {
+  const hasData = !!lastRawUsageData;
+  clipboard.writeText(hasData
+    ? JSON.stringify(lastRawUsageData, null, 2)
+    : 'No usage data captured yet — wait for the next poll.');
+  if (Notification.isSupported()) {
+    new Notification({
+      title: 'Claude Bar',
+      body: hasData ? 'Raw usage JSON copied to clipboard.' : 'No usage data yet — try again shortly.',
+    }).show();
+  }
+}
+
 // Menu is rebuilt on demand so checkbox/radio states always reflect settings.
 function buildTrayMenu() {
   const POLL_CHOICES = [1, 2, 5, 10];
@@ -833,6 +1004,7 @@ function buildTrayMenu() {
       click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }),
     },
     { type: 'separator' },
+    { label: 'Copy Raw Usage JSON', click: () => copyRawUsageJson() },
     { label: 'Check for Updates…', click: () => checkForUpdates() },
     { type: 'separator' },
     { label: 'Quit Claude Bar', click: () => app.quit() },
@@ -907,6 +1079,8 @@ app.whenReady().then(async () => {
   setTimeout(quietUpdateCheck, 60 * 1000);
   setInterval(quietUpdateCheck, 24 * 60 * 60 * 1000);
 });
+
+app.on('before-quit', flushHistory);
 
 // Don't quit when all windows are closed — the tray icon keeps the app alive.
 // The only exit path is Tray → "Quit Claude Bar".
