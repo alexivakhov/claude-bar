@@ -14,7 +14,7 @@ A transparent floating widget for macOS that tracks your Claude.ai usage limits 
 
 ## Features
 
-- **Usage history & sparkline** — click `∿` to see a 48 h sparkline per limit (SESSION / WEEKLY / EXTRA_US) with burn rate (`78.7%/h`), a forecast line, and a red marker at the projected limit time
+- **Usage history & sparkline** — click `∿` to see a 48 h sparkline per limit (SESSION / WEEKLY) with burn rate (`78.7%/h`), a forecast line, and a red marker at the projected limit time
 - **Usage % in the menubar** — the tray icon shows the Session limit percentage right next to it, so you don't even need the widget on screen
 - **Threshold notifications** — system notification when any limit crosses 80% / 95%, and when the session resets (both toggleable in the tray menu)
 - **Always on top** — borderless, semi-transparent widget that stays above all windows; click `⊤` to send it to the background, `⊥` to pin it back — choice persists across restarts
@@ -138,7 +138,7 @@ npm run dist -- --arm64
 ## Architecture notes
 
 - Polling interval: **2 minutes** by default, user-configurable via the tray menu (persisted to `{userData}/settings.json`); timer display refreshes locally every **30 seconds** from the `resetsAt` absolute timestamp
-- Update checks: silent daily check against GitHub Releases shows an in-widget banner; the menubar `%` is the max utilization across all bars
+- Update checks: silent daily check against GitHub Releases shows an in-widget banner; the menubar `%` is always the Session (five_hour) limit
 - Scraper session: **in-memory partition** (`scraper-temp`, no `persist:` prefix) — avoids LevelDB lock errors on rapid restarts
 - Usage bars are rendered dynamically from any JSON field with a `utilization` number — new Claude model limits appear automatically without code changes
 - Resize: dragging the corner updates `body.style.zoom` synchronously on every `mousemove` before the IPC call completes, so content and window frame scale together without lag
