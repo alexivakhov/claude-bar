@@ -136,6 +136,43 @@ function normalizeCredits(usageJson) {
   return { enabled: false };
 }
 
+// The prepaid balance is a sum of tranches with different expiry dates, and
+// the promotional ones are the short-lived part (the "Fable Cutover July
+// 2026" grant is ~90% of this account's balance and lapses 2026-09-19).
+// Showing one lump total hides that most of it evaporates on a date, so the
+// two pools are summarized separately. Tranches already past expires_at are
+// dropped — `amount` stays the authoritative total, this is a breakdown.
+//
+// `minor` is `null` (not `0`) when the list itself isn't a usable array, so
+// callers can tell "no list" apart from "list present, pool legitimately
+// spent/expired down to zero" — collapsing those cases previously let a
+// stale `amount` resurrect spent money as a phantom base balance.
+// Individual tranches are defended against malformed shape (non-object
+// entries, unparseable `expires_at`) rather than trusted, since a single bad
+// tranche used to throw and silently drop the whole promo/base breakdown.
+function summarizeTranches(list) {
+  if (!Array.isArray(list)) return { minor: null, expiresAt: null, count: 0 };
+  const now = Date.now();
+  let minor = 0;
+  let expiresAt = null;
+  let count = 0;
+  for (const t of list) {
+    if (!t || typeof t !== 'object') continue;
+    const remaining = t.remaining_amount_minor_units;
+    if (typeof remaining !== 'number' || remaining <= 0) continue;
+    let exp = null;
+    if (t.expires_at) {
+      const parsed = new Date(t.expires_at).getTime();
+      if (Number.isFinite(parsed)) exp = parsed;
+    }
+    if (exp !== null && exp <= now) continue;
+    minor += remaining;
+    count += 1;
+    if (exp !== null && (expiresAt === null || exp < expiresAt)) expiresAt = exp;
+  }
+  return { minor, expiresAt: expiresAt === null ? null : new Date(expiresAt).toISOString(), count };
+}
+
 // Fields at the top level of the usage response that are known NOT to be a
 // per-bucket bar (money/limits summaries, feature flags). Anything else that
 // shows up non-null but doesn't match the {utilization: number} bar shape is
@@ -144,13 +181,35 @@ function normalizeCredits(usageJson) {
 // silently dropping it (which is what happened before this check existed).
 const KNOWN_NON_BAR_KEYS = new Set(['extra_usage', 'spend', 'limits', 'member_dashboard_available']);
 
+// Keys we already know are real limit buckets (they have an entry in
+// LABEL_MAP) — these render even when momentarily hollow (0%, no reset
+// window), since that's a normal state for e.g. an idle Session bucket, not
+// a sign the key is an unlaunched feature flag.
+const KNOWN_BAR_KEYS = new Set(Object.keys(LABEL_MAP));
+
+// A "hollow" bucket — 0% utilization, no reset window, no money figures —
+// is how Anthropic ships a pre-launch codename (`nimbus_quill` went from
+// `null` to this exact shape on 2026-08-10) before it carries a real quota.
+// Only applied to *unrecognized* keys: a known bucket can legitimately be
+// 0%/no-window (idle Session) and must never be hidden just because it
+// hasn't reported a reset time yet.
+function isHollowUnlaunchedBucket(key, val) {
+  if (KNOWN_BAR_KEYS.has(key)) return false;
+  return val.utilization === 0 && !val.resets_at
+    && val.limit_dollars == null && val.used_dollars == null;
+}
+
 function collectUnknownKeys(usageJson) {
   const unknown = [];
   for (const [key, val] of Object.entries(usageJson)) {
     if (KNOWN_NON_BAR_KEYS.has(key)) continue;
     if (val === null || val === undefined) continue; // reserved/inactive bucket — nothing to report yet
     if (typeof val !== 'object') continue;
-    if (typeof val.utilization === 'number') continue; // handled as a normal bar below
+    // A real bar (known key, or an unknown key with a live quota) is handled
+    // below and doesn't need surfacing here. A hollow, unrecognized bucket
+    // isn't a bar either — route it here instead of dropping it silently, so
+    // the one-time "new usage field" notification still fires for it.
+    if (typeof val.utilization === 'number' && !isHollowUnlaunchedBucket(key, val)) continue;
     unknown.push(key);
   }
   return unknown;
@@ -172,6 +231,7 @@ function normalize(usageJson) {
     if (val === null || val === undefined) continue;
     if (typeof val !== 'object') continue;
     if (typeof val.utilization !== 'number') continue;
+    if (isHollowUnlaunchedBucket(key, val)) continue;
 
     bars.push({
       key,
@@ -252,6 +312,24 @@ async function poll() {
         data.credits.autoReloadThresholdMinor = prepaid.auto_reload_settings ? prepaid.auto_reload_settings.threshold_in_minor_units : null;
         data.credits.autoReloadTargetMinor = prepaid.auto_reload_settings ? prepaid.auto_reload_settings.reload_to_in_minor_units : null;
         data.credits.nextExpiresAt = prepaid.next_expires_at || null;
+
+        const promo = summarizeTranches(prepaid.promo_tranches);
+        const base = summarizeTranches(prepaid.tranches);
+        data.credits.promoMinor = promo.minor;
+        // Only attach a single lapse date when exactly one tranche is
+        // contributing — summing several tranches but tagging the total
+        // with the *earliest* one's date would claim the whole sum lapses
+        // then, when only part of it does.
+        data.credits.promoExpiresAt = promo.count === 1 ? promo.expiresAt : null;
+        data.credits.promoTrancheCount = promo.count;
+        // Fall back to "total minus promo" only when the plain tranche list
+        // is genuinely missing (base.minor === null), not when it's present
+        // and legitimately sums to zero (all base tranches spent/expired) —
+        // otherwise a stale `amount` that still counts that spent money
+        // resurrects it as a phantom base balance.
+        data.credits.baseMinor = base.minor !== null
+          ? base.minor
+          : (typeof prepaid.amount === 'number' ? Math.max(0, prepaid.amount - (promo.minor || 0)) : null);
       } catch (prepaidErr) {
         console.log('prepaid credits fetch failed (non-fatal):', prepaidErr.message);
       }

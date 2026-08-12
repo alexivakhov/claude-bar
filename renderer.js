@@ -428,12 +428,20 @@ function formatMoney(minor, currency, exponent) {
   }
 }
 
-// Usage credits, styled like a bar row. The headline number is the actual
-// prepaid balance (what you really have to spend, refreshed every poll) —
-// that's the number people actually want to watch trend down, not "$0.00
-// spent" against a monthly cap that most of the time isn't the binding
-// constraint. The monthly-spend/limit relationship still drives the bar
-// fill (it's the real 0–100% progress value) and moves to the tooltip.
+function fmtShortDate(iso) {
+  const d = new Date(iso);
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${dd}.${mm}.${String(d.getFullYear()).slice(-2)}`;
+}
+
+// Usage credits. Deliberately not a progress bar: the only 0–100% value on
+// offer is monthly overage spend, which sits at 0% for months on end and
+// says nothing about the balance — meanwhile the balance itself is two
+// pools with different expiry dates. So the row reads as money, splitting
+// the perishable promotional grant (with its date) from ordinary credits.
+// When the promo lapses its tranche drops out server-side and the line
+// collapses back to the plain balance on its own.
 function renderCredits(credits) {
   const row = document.getElementById('creditsRow');
   row.textContent = '';
@@ -443,16 +451,42 @@ function renderCredits(credits) {
   }
   row.style.display = '';
 
-  const pct = typeof credits.percent === 'number' ? credits.percent : 0;
   const usedStr = formatMoney(credits.usedMinor, credits.currency, credits.exponent);
   const limitStr = formatMoney(credits.limitMinor, credits.currency, credits.exponent);
-  const balanceStr = formatMoney(credits.balanceMinor, credits.balanceCurrency || credits.currency, 2);
+  const balCurrency = credits.balanceCurrency || credits.currency;
+  const balanceStr = formatMoney(credits.balanceMinor, balCurrency, 2);
+  const promoStr = credits.promoMinor > 0 ? formatMoney(credits.promoMinor, balCurrency, 2) : null;
+  const baseStr = formatMoney(credits.baseMinor, balCurrency, 2);
+
+  // A single contributing tranche gets tagged with its own lapse date. Once
+  // more than one promo tranche is live, summarizeTranches sums the money
+  // but the date would only belong to whichever one lapses first — showing
+  // it here would claim the whole sum lapses then, when only part does.
+  const promoSingleDate = promoStr && credits.promoTrancheCount === 1 && credits.promoExpiresAt
+    ? fmtShortDate(credits.promoExpiresAt)
+    : null;
+
+  // next_expires_at is the soonest expiry across every tranche, promo or
+  // not. It only duplicates the promo date when the promo tranche IS that
+  // soonest one — comparing the two (instead of just checking "is a promo
+  // date showing") means a non-promo tranche expiring sooner still gets its
+  // own warning instead of being silently shadowed by the promo's date.
+  const nextIsPromoExpiry = credits.promoExpiresAt && credits.nextExpiresAt
+    && new Date(credits.promoExpiresAt).getTime() === new Date(credits.nextExpiresAt).getTime();
 
   const titleParts = [];
+  if (balanceStr) titleParts.push(`${balanceStr} balance`);
+  if (promoStr && credits.promoTrancheCount > 1) {
+    titleParts.push(`${promoStr} promotional across ${credits.promoTrancheCount} grants`);
+  } else if (promoStr && promoSingleDate) {
+    titleParts.push(`${promoStr} promotional, expires ${promoSingleDate}`);
+  } else if (promoStr) {
+    titleParts.push(`${promoStr} promotional`);
+  }
   if (usedStr && limitStr) titleParts.push(`${usedStr} of ${limitStr} monthly spend`);
   if (credits.spendLimitReached) titleParts.push('limit reached');
   if (credits.autoReloadEnabled) titleParts.push('auto-reload on');
-  if (credits.nextExpiresAt) {
+  if (credits.nextExpiresAt && !nextIsPromoExpiry) {
     const daysLeft = Math.ceil((new Date(credits.nextExpiresAt).getTime() - Date.now()) / 86400000);
     if (daysLeft > 0 && daysLeft <= 60) titleParts.push(`credit expires in ${daysLeft}d`);
   }
@@ -462,22 +496,38 @@ function renderCredits(credits) {
   nameSpan.className = 'bar-name';
   nameSpan.textContent = 'CREDITS';
 
-  const track = document.createElement('div');
-  track.className = 'track';
-  const fill = document.createElement('div');
-  const cls = credits.spendLimitReached ? 'crit' : barColor(pct);
-  fill.className = 'fill' + (cls ? ' ' + cls : '');
-  fill.style.width = Math.min(100, pct) + '%';
-  track.appendChild(fill);
+  const valueSpan = document.createElement('span');
+  valueSpan.className = 'credits-value' + (credits.spendLimitReached ? ' crit' : '');
 
-  const pctSpan = document.createElement('span');
-  pctSpan.className = 'pct credits-pct';
-  pctSpan.textContent = balanceStr
-    || (usedStr && limitStr ? `${usedStr} / ${limitStr}` : `${Math.round(pct)}%`);
+  // Two independently-sized parts, not one string: the promo half may
+  // ellipsis under width pressure (its full detail is in the tooltip
+  // regardless), but the trailing balance — the money that doesn't evaporate
+  // on a date — never shrinks and is never the part that gets clipped.
+  if (promoStr) {
+    const promoSpan = document.createElement('span');
+    promoSpan.className = 'credits-promo';
+    promoSpan.appendChild(document.createTextNode(promoStr));
+    if (promoSingleDate) {
+      const note = document.createElement('span');
+      note.className = 'credits-note';
+      note.textContent = ` till ${promoSingleDate}`;
+      promoSpan.appendChild(note);
+    }
+    valueSpan.appendChild(promoSpan);
+  }
+
+  // The separator lives inside credits-rest (not as a bare text node between
+  // flex children) — a standalone whitespace-adjacent text node between flex
+  // items can get its space collapsed away by some layout engines.
+  const restSpan = document.createElement('span');
+  restSpan.className = 'credits-rest';
+  const restText = baseStr || balanceStr
+    || (usedStr && limitStr ? `${usedStr} / ${limitStr}` : '—');
+  restSpan.textContent = promoStr ? `, ${restText}` : restText;
+  valueSpan.appendChild(restSpan);
 
   row.appendChild(nameSpan);
-  row.appendChild(track);
-  row.appendChild(pctSpan);
+  row.appendChild(valueSpan);
 }
 
 // Two weekly buckets confirmed to be alternative pools for the same work
