@@ -14,11 +14,13 @@ A transparent floating widget for macOS that tracks your Claude.ai usage limits 
 
 ## Features
 
-- **Usage history & sparkline** — click `∿` to see a 48 h sparkline per limit (SESSION / WEEKLY) with burn rate (`78.7%/h`), a forecast line, and a red marker at the projected limit time
+- **Real-time usage bars** — Session (5 h) and Weekly (7 d), plus any extra per-model/feature bucket the API reports (e.g. the Sonnet/Opus split on Max plans); new buckets show up automatically as Anthropic adds them, and pre-launch API fields that don't carry a real quota yet stay hidden until they do
+- **Usage credits** — the perishable part of your balance (a promotional grant) is shown separately from the standing balance, each with its own expiry date, instead of one lump sum that hides how much is about to evaporate; falls back to a plain monthly-spend readout on accounts without a wallet balance
+- **Model-bucket advisory** — a one-line hint when Sonnet and Opus usage diverge meaningfully, pointing at which pool still has headroom (Max plans only)
+- **Usage history & sparkline** — click `∿` for a 48 h sparkline per bucket (a chip per bar — Session, Weekly, and any others present) with burn rate (`%/h`), a forecast line to the projected limit-hit time, and a pace multiplier against the rate that would land exactly on reset (weekly bars)
 - **Usage % in the menubar** — the tray icon shows the Session limit percentage right next to it, so you don't even need the widget on screen
-- **Threshold notifications** — system notification when any limit crosses 80% / 95%, and when the session resets (both toggleable in the tray menu)
+- **Threshold notifications** — system notification when any usage bar (or the usage-credits spend) crosses 80% / 95%, when the session resets, and when the credits spend limit is actually hit (all toggleable in the tray menu)
 - **Always on top** — borderless, semi-transparent widget that stays above all windows; click `⊤` to send it to the background, `⊥` to pin it back — choice persists across restarts
-- **Real-time usage bars** — session, weekly, and per-model limits with color coding
 - **Plan detection** — automatically reads your plan (Free, Pro, Max, Team, Enterprise) from the API
 - **Smart colors** — blue → yellow → red as limits fill up (0–34% / 35–79% / 80–100%)
 - **3 color themes** — Dark, Light, and Mauve — click `◑` in the footer to cycle; choice persists across restarts
@@ -63,7 +65,9 @@ Left-click the tray icon to show/hide the widget. Right-click to access:
 | Notify at 80% / 95% | Toggle threshold notifications |
 | Notify on Session Reset | Toggle "you can work again" notification |
 | Launch at Login | Start Claude Bar automatically on login |
+| Copy Raw Usage JSON | Copy the last poll's unprocessed API response to the clipboard (debugging) |
 | Check for Updates… | Download and install the latest release automatically |
+| About Claude Bar | Version, Electron/Chromium version, and a link to the GitHub repo |
 | Quit | Exit the app |
 
 ## Themes
