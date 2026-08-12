@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen, ipcMain, session, Tray, Menu, nativeImage, dialog, safeStorage, Notification, clipboard } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, session, Tray, Menu, nativeImage, dialog, safeStorage, Notification, clipboard, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
@@ -936,6 +936,30 @@ function copyRawUsageJson() {
   }
 }
 
+// Native dialog rather than a third BrowserWindow — this is a one-shot
+// informational popup, not something that needs its own window lifecycle,
+// IPC, or a place in the floatWin/scraperWin bookkeeping.
+async function showAboutDialog() {
+  const { response } = await dialog.showMessageBox(floatWin, {
+    type: 'info',
+    title: 'About Claude Bar',
+    message: `Claude Bar ${app.getVersion()}`,
+    detail: 'A floating widget that tracks your Claude.ai usage limits — '
+      + 'session, weekly, and usage credits — from the menu bar.\n\n'
+      + `Electron ${process.versions.electron} · Chromium ${process.versions.chrome}\n`
+      + `github.com/${GITHUB_REPO}`,
+    buttons: ['OK', 'View on GitHub'],
+    defaultId: 0,
+    cancelId: 0,
+    icon: nativeImage.createFromPath(path.join(__dirname, 'tray-icon@2x.png')),
+  });
+  if (response === 1) shell.openExternal(`https://github.com/${GITHUB_REPO}`);
+  // Showing any dialog un-hides the dock icon on macOS despite LSUIElement —
+  // every other dialog path in this file re-hides it afterward, so this one
+  // must too or the dock icon sticks around after the About box closes.
+  if (app.dock) app.dock.hide();
+}
+
 // Menu is rebuilt on demand so checkbox/radio states always reflect settings.
 function buildTrayMenu() {
   const POLL_CHOICES = [1, 2, 5, 10];
@@ -985,6 +1009,7 @@ function buildTrayMenu() {
     { type: 'separator' },
     { label: 'Copy Raw Usage JSON', click: () => copyRawUsageJson() },
     { label: 'Check for Updates…', click: () => checkForUpdates() },
+    { label: 'About Claude Bar', click: () => showAboutDialog() },
     { type: 'separator' },
     { label: 'Quit Claude Bar', click: () => app.quit() },
   ]);
