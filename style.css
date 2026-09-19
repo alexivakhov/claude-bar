@@ -312,6 +312,11 @@ html[data-theme="light"] .bar {
   display: block;
 }
 
+.update-banner.busy {
+  cursor: default;
+  pointer-events: none;
+}
+
 .footer {
   display: flex;
   justify-content: space-between;

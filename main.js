@@ -736,7 +736,9 @@ function fetchJSON(url, redirectCount = 0) {
 }
 
 // B2: downloadFile with status check and response error handling
-function downloadFile(url, destPath, redirectCount = 0) {
+// onProgress(pct) is called as bytes arrive so the caller can surface a
+// download indicator instead of leaving the UI silent for the whole transfer.
+function downloadFile(url, destPath, onProgress, redirectCount = 0) {
   const MAX_REDIRECTS = 10;
   return new Promise((resolve, reject) => {
     function get(u, depth) {
@@ -758,6 +760,14 @@ function downloadFile(url, destPath, redirectCount = 0) {
         if (res.statusCode < 200 || res.statusCode >= 300) {
           res.resume();
           return reject(new Error(`Download failed: HTTP ${res.statusCode} from ${u}`));
+        }
+        const total = parseInt(res.headers['content-length'], 10) || 0;
+        let received = 0;
+        if (total && onProgress) {
+          res.on('data', (chunk) => {
+            received += chunk.length;
+            onProgress(Math.min(99, Math.floor((received / total) * 100)));
+          });
         }
         const file = fs.createWriteStream(destPath);
         res.pipe(file);
@@ -799,7 +809,18 @@ function isSafeAssetName(name) {
   return /^[A-Za-z0-9._-]+$/.test(path.basename(name));
 }
 
+// Prevents a second click (impatient because the first gave no feedback)
+// from racing the first: the earlier run's app.quit() would kill the later
+// one mid-download, leaving an orphaned partial file in the temp dir.
+let updateInProgress = false;
+
+function sendUpdateStatus(status) {
+  if (floatWin && !floatWin.isDestroyed()) floatWin.webContents.send('update-status', status);
+}
+
 async function checkForUpdates() {
+  if (updateInProgress) return;
+  updateInProgress = true;
   tray.setToolTip('Claude Bar — checking…');
   try {
     const release = await fetchJSON(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`);
@@ -867,8 +888,10 @@ async function checkForUpdates() {
     const mntPath = path.join(tmpDir, 'mnt');
 
     tray.setToolTip('Claude Bar — downloading…');
-    await downloadFile(asset.browser_download_url, dmgPath);
+    sendUpdateStatus({ state: 'downloading', pct: 0 });
+    await downloadFile(asset.browser_download_url, dmgPath, (pct) => sendUpdateStatus({ state: 'downloading', pct }));
     tray.setToolTip('Claude Bar');
+    sendUpdateStatus({ state: 'installing' });
 
     fs.mkdirSync(mntPath, { recursive: true });
     fs.writeFileSync(scriptPath, [
@@ -900,6 +923,7 @@ async function checkForUpdates() {
 
   } catch (e) {
     tray.setToolTip('Claude Bar');
+    sendUpdateStatus({ state: 'error' });
     console.error('update check failed:', e.message);
     await dialog.showMessageBox(floatWin, {
       type: 'error',
@@ -909,6 +933,8 @@ async function checkForUpdates() {
       buttons: ['OK'],
     });
     if (app.dock) app.dock.hide();
+  } finally {
+    updateInProgress = false;
   }
 }
 
@@ -1089,6 +1115,14 @@ app.whenReady().then(async () => {
   // Feature 5: check once shortly after launch, then daily
   setTimeout(quietUpdateCheck, 60 * 1000);
   setInterval(quietUpdateCheck, 24 * 60 * 60 * 1000);
+
+  // The 2-min poll lives on a setInterval inside the hidden scraper window;
+  // across a sleep it doesn't catch up, so the first thing seen after waking
+  // the Mac is a reading from before it slept ("updated 3h ago"). Poll once on
+  // wake/unlock — poll() has its own in-flight guard, so an overlap with the
+  // interval tick is a no-op rather than a duplicate history point.
+  powerMonitor.on('resume', triggerPoll);
+  powerMonitor.on('unlock-screen', triggerPoll);
 });
 
 app.on('before-quit', flushHistory);
@@ -1101,11 +1135,3 @@ app.on('activate', () => {
   if (app.dock) app.dock.hide();
   if (floatWin && !floatWin.isDestroyed() && !floatWin.isVisible()) floatWin.show();
 });
-
-  // The 2-min poll lives on a setInterval inside the hidden scraper window;
-  // across a sleep it doesn't catch up, so the first thing seen after waking
-  // the Mac is a reading from before it slept ("updated 3h ago"). Poll once on
-  // wake/unlock — poll() has its own in-flight guard, so an overlap with the
-  // interval tick is a no-op rather than a duplicate history point.
-  powerMonitor.on('resume', triggerPoll);
-  powerMonitor.on('unlock-screen', triggerPoll);

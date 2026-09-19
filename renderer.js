@@ -706,6 +706,21 @@ window.claudeBar.onUpdateAvailable((info) => {
 
 document.getElementById('updateBanner').addEventListener('click', () => window.claudeBar.installUpdate());
 
+// Progress for the download/install that installUpdate() kicks off — the
+// transfer can take a while and previously gave no sign it was running.
+window.claudeBar.onUpdateStatus((status) => {
+  const banner = document.getElementById('updateBanner');
+  if (status.state === 'downloading') {
+    banner.textContent = `↓ downloading update… ${status.pct}%`;
+    banner.classList.add('visible', 'busy');
+  } else if (status.state === 'installing') {
+    banner.textContent = '↻ installing… relaunching';
+  } else if (status.state === 'error') {
+    banner.classList.remove('busy');
+  }
+  requestFitResize();
+});
+
 window.claudeBar.onHistoryUpdate((data) => {
   historyData = data;
   if (histScreen) renderHistScreen();
