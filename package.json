@@ -21,6 +21,7 @@
       "main.js",
       "preload.js",
       "preload-scraper.js",
+      "preload-auth.js",
       "index.html",
       "renderer.js",
       "style.css",

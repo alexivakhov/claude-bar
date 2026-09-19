@@ -345,9 +345,17 @@ async function poll() {
     return data;
   } catch (err) {
     if (err.message.startsWith('organizations:')) cachedOrg = null;
+    // claude.ai answers an invalid/expired session on /api/organizations with
+    // 403 + `account_session_invalid`, not 401, so a session the server had
+    // already dropped used to read as a plain network error: the widget sat on
+    // "offline" and never offered the login it actually needed. A 403 on
+    // /usage is different (plan without usage tracking) and is handled above,
+    // before this catch — only the organizations call reaches here.
+    const status401 = /\b401\b/.test(err.message);
+    const orgForbidden = /^organizations: 403/.test(err.message);
     ipcRenderer.send('usage:error', {
       message: err.message,
-      reauth: /\b401\b/.test(err.message), // 401 only — 403 on usage handled above
+      reauth: status401 || orgForbidden,
     });
     return null;
   } finally {

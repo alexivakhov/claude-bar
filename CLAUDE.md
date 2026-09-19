@@ -85,6 +85,8 @@ preload-scraper.js  poll() [configurable interval, default 2 min; guarded agains
 - `scraperWin.webContents.setUserAgent(CHROME_UA)` is required. Google rejects Electron's default UA with `disallowed_useragent`. The Chrome version in the UA must match the bundled Chromium (`process.versions.chrome`).
 - After the OAuth popup closes, the SPA needs ~8 s to complete the code exchange before the session cookie is set. Don't reload too early.
 - `setWindowOpenHandler` only allows popups from `ALLOWED_POPUP_HOSTS` (claude.ai, google.com, apple.com domains).
+- **Electron has no WebAuthn authenticator on macOS**, so Google's passkey challenge (`accounts.google.com/v3/signin/challenge/pk`) shows "Verifying it's you… Complete sign-in using your passkey" and waits forever — `navigator.credentials.get({publicKey})` never settles. `preload-auth.js` (registered on the scraper *session*, so it also covers OAuth popups) hides `PublicKeyCredential` and rejects publicKey credential requests, which makes Google fall through to `challenge/selection` (password, TOTP, emailed code) instead. If Google's 2-step hoops still dead-end, claude.ai's own email + login-code flow avoids Google entirely.
+- claude.ai answers an expired session on `/api/organizations` with **403 + `account_session_invalid`**, not 401 (`preload-scraper.js` treats `organizations: 403` as reauth). A 403 on `/usage` is unrelated — that's a plan without usage tracking.
 
 ### Cookie persistence
 - Filter cookies by `url: 'https://claude.ai'` (not `domain:` — the latter doesn't match `.claude.ai` subdomains).

@@ -321,6 +321,14 @@ async function createScraper() {
 
   scraperWin.webContents.setUserAgent(CHROME_UA);
 
+  // Google's sign-in offers a passkey step that hangs forever in Electron (no
+  // WebAuthn authenticator). Registered on the session so it covers the OAuth
+  // popups too — see preload-auth.js.
+  scraperSession().registerPreloadScript({
+    type: 'frame',
+    filePath: path.join(__dirname, 'preload-auth.js'),
+  });
+
   await restoreCookies();
   scraperWin.loadURL('https://claude.ai/new');
 
