@@ -109,16 +109,32 @@ function requestFitResize() {
   window.claudeBar.resize(window.innerWidth, desired);
 }
 
+// The big timer is the Session countdown and nothing else — never the first
+// bar that happens to be in the list. Falling back to bars[0] meant that on a
+// payload without a `five_hour` bucket the widget silently counted down to the
+// *weekly* reset under a Session-shaped label.
+//
+// A countdown is also only shown while the Session bucket actually holds
+// usage. The API keeps reporting a `resets_at` for a five-hour window opened
+// elsewhere (another device, or before this Mac booted), so right after login
+// the widget used to show e.g. "4:21" next to "SESSION 0%" — a countdown for a
+// session that has nothing in it. At 0% there is nothing to wait for, so the
+// timer reads "--:--"; the exact reset time stays in the Session row tooltip.
+function sessionCountdownMs(bars) {
+  const bar = bars && bars.find(b => b.key === 'five_hour');
+  if (!bar || !bar.resetsAt) return null;
+  if (!(bar.utilization > 0)) return null; // idle bucket — no live window to count down
+  return Math.max(0, new Date(bar.resetsAt).getTime() - Date.now());
+}
+
 // B5: Update just the timer and its color classes from resetsAt without re-rendering bars
 function updateTimerFromResetsAt() {
   if (!lastData || !lastData.bars || lastData.bars.length === 0) return;
   const timer = document.getElementById('timer');
   const dot = document.getElementById('dot');
-  const sessionBar = lastData.bars.find(b => b.key === 'five_hour') || lastData.bars[0];
-  if (!sessionBar || sessionBar.resetsAt === null || sessionBar.resetsAt === undefined) return;
 
-  const msLeft = Math.max(0, new Date(sessionBar.resetsAt).getTime() - Date.now());
-  const resetMins = Math.round(msLeft / 60000);
+  const msLeft = sessionCountdownMs(lastData.bars);
+  const resetMins = msLeft !== null ? Math.round(msLeft / 60000) : null;
   const tc = colorClass(resetMins);
   dot.className = 'dot' + (tc ? ' ' + tc : ' ok');
   timer.textContent = fmt(resetMins);
@@ -628,11 +644,8 @@ function render(data) {
   loginBtn.textContent = '↗ log out';
   lastTs = data.fetchedAt;
 
-  const sessionBar = data.bars.find(b => b.key === 'five_hour') || data.bars[0];
   // B5: compute from resetsAt (absolute time) rather than stale msUntilReset
-  const msLeft = sessionBar && sessionBar.resetsAt
-    ? Math.max(0, new Date(sessionBar.resetsAt).getTime() - Date.now())
-    : null;
+  const msLeft = sessionCountdownMs(data.bars);
   const resetMins = msLeft !== null ? Math.round(msLeft / 60000) : null;
 
   const tc = colorClass(resetMins);

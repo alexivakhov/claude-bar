@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen, ipcMain, session, Tray, Menu, nativeImage, dialog, safeStorage, Notification, clipboard, shell } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, session, Tray, Menu, nativeImage, dialog, safeStorage, Notification, clipboard, shell, powerMonitor } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
@@ -502,7 +502,14 @@ function updateTrayTitle(data) {
     tray.setTitle('');
     return;
   }
-  const sessionBar = data.bars.find(b => b.key === 'five_hour') || data.bars[0];
+  // Session only — no bars[0] fallback: on a payload without a five_hour
+  // bucket that showed the *weekly* percentage under a Session-shaped number,
+  // which is exactly the ambiguity this title was narrowed to avoid.
+  const sessionBar = data.bars.find(b => b.key === 'five_hour');
+  if (!sessionBar) {
+    tray.setTitle('');
+    return;
+  }
   tray.setTitle(` ${Math.round(sessionBar.utilization)}%`, { fontType: 'monospacedDigit' });
 }
 
@@ -1094,3 +1101,11 @@ app.on('activate', () => {
   if (app.dock) app.dock.hide();
   if (floatWin && !floatWin.isDestroyed() && !floatWin.isVisible()) floatWin.show();
 });
+
+  // The 2-min poll lives on a setInterval inside the hidden scraper window;
+  // across a sleep it doesn't catch up, so the first thing seen after waking
+  // the Mac is a reading from before it slept ("updated 3h ago"). Poll once on
+  // wake/unlock — poll() has its own in-flight guard, so an overlap with the
+  // interval tick is a no-op rather than a duplicate history point.
+  powerMonitor.on('resume', triggerPoll);
+  powerMonitor.on('unlock-screen', triggerPoll);
