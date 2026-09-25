@@ -179,7 +179,22 @@ function summarizeTranches(list) {
 // a genuinely new field we don't understand yet — surfaced via
 // data.unknownKeys so main.js can fire a one-time notification instead of
 // silently dropping it (which is what happened before this check existed).
-const KNOWN_NON_BAR_KEYS = new Set(['extra_usage', 'spend', 'limits', 'member_dashboard_available']);
+const KNOWN_NON_BAR_KEYS = new Set(['extra_usage', 'spend', 'limits', 'member_dashboard_available', 'seven_day_breakdown']);
+
+// Dollar-denominated grants that arrive shaped like a limit bucket
+// (utilization + resets_at) but carry limit/used/remaining_dollars. Confirmed
+// live 2026-09-25: `iguana_necktie` appeared with {limit_dollars:100,
+// used_dollars:0, resets_at:2026-11-05} the day a $100 Claude Code cloud
+// sessions gift was claimed — and it is NOT one of the prepaid tranches, so
+// it can't be folded into the CREDITS balance. Rendered as its own money row
+// instead of a % bar. Unmapped grant keys still render, under shortify().
+const GRANT_LABEL_MAP = {
+  iguana_necktie: 'CLOUD',
+};
+
+function isDollarGrant(val) {
+  return typeof val.limit_dollars === 'number' && val.limit_dollars > 0;
+}
 
 // Keys we already know are real limit buckets (they have an entry in
 // LABEL_MAP) — these render even when momentarily hollow (0%, no reset
@@ -225,6 +240,7 @@ const MODEL_BUCKET_KEYS = ['seven_day_sonnet', 'seven_day_opus'];
 
 function normalize(usageJson) {
   const bars = [];
+  const grants = [];
 
   for (const [key, val] of Object.entries(usageJson)) {
     if (KNOWN_NON_BAR_KEYS.has(key)) continue;
@@ -232,6 +248,22 @@ function normalize(usageJson) {
     if (typeof val !== 'object') continue;
     if (typeof val.utilization !== 'number') continue;
     if (isHollowUnlaunchedBucket(key, val)) continue;
+
+    if (!KNOWN_BAR_KEYS.has(key) && isDollarGrant(val)) {
+      const used = typeof val.used_dollars === 'number' ? val.used_dollars : null;
+      grants.push({
+        key,
+        shortLabel: GRANT_LABEL_MAP[key] || shortify(key),
+        limitDollars: val.limit_dollars,
+        usedDollars: used,
+        remainingDollars: typeof val.remaining_dollars === 'number'
+          ? val.remaining_dollars
+          : (used !== null ? val.limit_dollars - used : null),
+        utilization: val.utilization,
+        endsAt: val.resets_at || null,
+      });
+      continue;
+    }
 
     bars.push({
       key,
@@ -255,6 +287,7 @@ function normalize(usageJson) {
 
   return {
     bars,
+    grants,
     credits: normalizeCredits(usageJson),
     unknownKeys: collectUnknownKeys(usageJson),
     fetchedAt: Date.now(),

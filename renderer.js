@@ -546,6 +546,49 @@ function renderCredits(credits) {
   row.appendChild(valueSpan);
 }
 
+// Scoped dollar grants (see preload-scraper.js GRANT_LABEL_MAP) — money that
+// can only be spent on one product, so shown next to CREDITS rather than
+// summed into it: "$100.00 till 05.11.26", or "$87.40 / $100.00" once spent.
+function renderGrants(grants, creditsVisible) {
+  const el = document.getElementById('grantRows');
+  el.textContent = '';
+  if (!Array.isArray(grants)) return;
+  grants.forEach((g, i) => {
+    const row = document.createElement('div');
+    row.className = 'bar-row grant-row' + (i === 0 && !creditsVisible ? ' credits-row' : '');
+
+    const remainingStr = formatMoney(g.remainingDollars, 'USD', 0);
+    const limitStr = formatMoney(g.limitDollars, 'USD', 0);
+    const endStr = g.endsAt ? fmtShortDate(g.endsAt) : null;
+    const spent = typeof g.usedDollars === 'number' && g.usedDollars > 0;
+
+    const titleParts = [`${remainingStr || '—'} of ${limitStr} left`];
+    if (endStr) titleParts.push(`window ends ${endStr}`);
+    row.title = titleParts.join(' · ');
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'bar-name';
+    nameSpan.textContent = g.shortLabel;
+
+    const valueSpan = document.createElement('span');
+    valueSpan.className = 'credits-value' + (g.remainingDollars === 0 ? ' crit' : '');
+    const rest = document.createElement('span');
+    rest.className = 'credits-rest';
+    rest.textContent = spent ? `${remainingStr} / ${limitStr}` : (remainingStr || '—');
+    if (endStr) {
+      const note = document.createElement('span');
+      note.className = 'credits-note';
+      note.textContent = ` till ${endStr}`;
+      rest.appendChild(note);
+    }
+    valueSpan.appendChild(rest);
+
+    row.appendChild(nameSpan);
+    row.appendChild(valueSpan);
+    el.appendChild(row);
+  });
+}
+
 // Two weekly buckets confirmed to be alternative pools for the same work
 // (Sonnet vs Opus, Max-only — both null on Pro/Free so this naturally does
 // nothing there). See preload-scraper.js MODEL_BUCKET_KEYS for why this
@@ -620,6 +663,7 @@ function render(data) {
     if (resetTimesEl) resetTimesEl.textContent = '';
 
     renderCredits(data?.credits);
+    renderGrants(data?.grants, !!(data?.credits && data.credits.enabled));
     document.getElementById('advisory').textContent = '';
 
     if (data?.noUsagePage) {
@@ -673,6 +717,7 @@ function render(data) {
   }
 
   renderCredits(data.credits);
+  renderGrants(data.grants, !!(data.credits && data.credits.enabled));
   document.getElementById('advisory').textContent = modelBucketAdvisory(data.bars);
 
   requestFitResize();
