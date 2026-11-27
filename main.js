@@ -4,7 +4,6 @@ const fs = require('fs');
 const https = require('https');
 const os = require('os');
 const { spawn } = require('child_process');
-const einkServer = require('./eink-server');
 
 let floatWin;
 let scraperWin;
@@ -27,11 +26,6 @@ const settings = {
   // Usage-field keys we've already fired the one-time "new field detected"
   // notification for, so it doesn't repeat every poll (see checkUnknownKeys).
   notifiedUnknownKeys: [],
-  // E-ink companion display: LAN endpoint (see eink-server.js). Token is
-  // generated on first enable.
-  einkEnabled: false,
-  einkPort: einkServer.DEFAULT_PORT,
-  einkToken: null,
 };
 
 function loadSettings() {
@@ -970,32 +964,6 @@ async function quietUpdateCheck() {
 // Debug: copies the last poll's unnormalized org + usage JSON to the
 // clipboard, so a new API field (bucket key, capability) can be inspected
 // without attaching a debugger to the hidden scraper window.
-function startEinkServer() {
-  if (!settings.einkToken) {
-    settings.einkToken = einkServer.newToken();
-    saveSettings();
-  }
-  einkServer.start({
-    port: settings.einkPort,
-    token: settings.einkToken,
-    getData: () => lastUsageData,
-  });
-}
-
-function setEinkEnabled(on) {
-  settings.einkEnabled = on;
-  saveSettings();
-  if (on) startEinkServer(); else einkServer.stop();
-}
-
-function copyEinkConfig() {
-  const url = `http://${os.hostname()}:${settings.einkPort}/usage`;
-  clipboard.writeText(`url=${url}\ntoken=${settings.einkToken}`);
-  if (Notification.isSupported()) {
-    new Notification({ title: 'Claude Bar', body: 'E-ink endpoint URL and token copied to clipboard.' }).show();
-  }
-}
-
 function copyRawUsageJson() {
   const hasData = !!lastRawUsageData;
   clipboard.writeText(hasData
@@ -1080,13 +1048,6 @@ function buildTrayMenu() {
       click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }),
     },
     { type: 'separator' },
-    {
-      label: 'E-ink Display Server',
-      type: 'checkbox',
-      checked: settings.einkEnabled,
-      click: (item) => setEinkEnabled(item.checked),
-    },
-    { label: 'Copy E-ink Config', enabled: settings.einkEnabled, click: () => copyEinkConfig() },
     { label: 'Copy Raw Usage JSON', click: () => copyRawUsageJson() },
     { label: 'Check for Updates…', click: () => checkForUpdates() },
     { label: 'About Claude Bar', click: () => showAboutDialog() },
@@ -1152,7 +1113,6 @@ app.whenReady().then(async () => {
   loadSettings();
   loadHistory();
   createTray();
-  if (settings.einkEnabled) startEinkServer();
   createFloatWindow();
   floatWin.webContents.once('did-finish-load', sendConfigToWidget);
   await createScraper();
