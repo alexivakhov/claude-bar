@@ -192,6 +192,15 @@ const GRANT_LABEL_MAP = {
   iguana_necktie: 'CLOUD',
 };
 
+// The full key behind the truncated "MAPLE_SU" label was only seen cut to 8
+// chars, so match by prefix (maple_su*) rather than guessing the exact name.
+// It's the DUET credit grant.
+function grantLabel(key) {
+  if (GRANT_LABEL_MAP[key]) return GRANT_LABEL_MAP[key];
+  if (key.startsWith('maple_su')) return 'DUET';
+  return shortify(key);
+}
+
 function isDollarGrant(val) {
   return typeof val.limit_dollars === 'number' && val.limit_dollars > 0;
 }
@@ -253,7 +262,7 @@ function normalize(usageJson) {
       const used = typeof val.used_dollars === 'number' ? val.used_dollars : null;
       grants.push({
         key,
-        shortLabel: GRANT_LABEL_MAP[key] || shortify(key),
+        shortLabel: grantLabel(key),
         limitDollars: val.limit_dollars,
         usedDollars: used,
         remainingDollars: typeof val.remaining_dollars === 'number'
